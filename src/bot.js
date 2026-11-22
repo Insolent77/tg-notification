@@ -188,9 +188,21 @@ export function createBot(config, store) {
   });
   bot.callbackQuery(/^done:(\d+)$/,async ctx=>{
     const id=Number(ctx.match[1]);
+    const current=store.get(id);
+    if(current?.status==='active' && current.priority==='high' && current.progress_count===0){
+      await ctx.answerCallbackQuery();
+      return ctx.reply('Это важное дело. Уже полностью готово или пока есть продвижение?',{
+        reply_markup:new InlineKeyboard().text('✅ Готово целиком','confirmdone:'+id).text('📈 Есть прогресс','progress:'+id)
+      });
+    }
     const task=store.done(id);
     await ctx.answerCallbackQuery({text:task?'Задача выполнена':'Задача уже завершена'});
     if(task) await ctx.editMessageReplyMarkup({reply_markup:new InlineKeyboard().text('✅ Выполнено','noop')}).catch(()=>{});
+  });
+  bot.callbackQuery(/^confirmdone:(\d+)$/,async ctx=>{
+    const task=store.done(Number(ctx.match[1]));
+    await ctx.answerCallbackQuery({text:task?'Готово, убрал из списка':'Задача уже завершена'});
+    if(task)await ctx.editMessageText('✅ «'+task.title+'» выполнено. Отлично, идём дальше.').catch(()=>{});
   });
   bot.callbackQuery(/^snooze:(\d+)$/,async ctx=>{
     const id=Number(ctx.match[1]);
