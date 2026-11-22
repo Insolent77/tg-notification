@@ -1,3 +1,4 @@
+import {localDate} from './dates.js';
 import {rankTasks,morningBrief,eveningBrief} from './secretary.js';
 import express from 'express';
 import crypto from 'node:crypto';
@@ -41,7 +42,7 @@ export function createServer(config,store) {
     const task=store.create({title,category,dueAt:due_at,priority});
     res.status(201).json({task});
   };
-  app.get('/api/tasks',tgAuth,(_req,res)=>res.json({tasks:store.list(),recommended:rankTasks(store.list()).slice(0,3).map(t=>t.id)}));
+  app.get('/api/tasks',tgAuth,(_req,res)=>res.json({tasks:store.list(),recommended:rankTasks(store.list().filter(t=>t.due_at && localDate(new Date(t.due_at),config.timeZone)<=localDate(new Date(),config.timeZone))).slice(0,3).map(t=>t.id)}));
   app.get('/api/briefing',tgAuth,(_req,res)=>res.json({morning:morningBrief(store.list(),config.timeZone),evening:eveningBrief(store.list(),config.timeZone)}));
   const updateTask=(action)=>withErrors((req,res)=>{
     const id=Number(req.params.id);
