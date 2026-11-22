@@ -29,7 +29,7 @@ async function tick() {
     for(const task of store.due()) {
       const next=new Date(Date.now()+repeatMs(task)).toISOString();
       if(!store.claim(task.id,task.next_notify_at,next))continue;
-      try {await sendReminder(task);}
+      try {await sendReminder(task);store.markNotified(task.id);}
       catch(err) {
         store.restoreClaim(task.id,next,task.next_notify_at);
         console.error('Reminder send failed for task',task.id,err.message);
