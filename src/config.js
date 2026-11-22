@@ -22,6 +22,7 @@ export function readConfig(env = process.env) {
   return {
     botToken, owner, port, repeatMinutes, timeZone, publicUrl, morningHour, eveningHour, quietFrom, quietUntil,
     databasePath: env.DATABASE_PATH || './data/tasks.sqlite',
-    integrationKey: (env.INTEGRATION_API_KEY || '').trim()
+    integrationKey: (env.INTEGRATION_API_KEY || '').trim(),
+    openaiApiKey: (env.OPENAI_API_KEY || '').trim(), openaiModel: env.OPENAI_MODEL || 'gpt-4.1-mini'
   };
 }
