@@ -229,8 +229,26 @@ export function createBot(config, store) {
   }
   async function sendDaily(kind){
     const text=kind==='morning'?morningBrief(store.list(),config.timeZone):eveningBrief(store.list(),config.timeZone);
-    await bot.api.sendMessage(config.owner,text,{reply_markup:new InlineKeyboard().text('📋 Мои задачи','list:open')});
+    const keyboard=new InlineKeyboard();
+    if(kind==='morning'){
+      const day=today();
+      const first=rankTasks(store.list().filter(t=>t.due_at&&localDate(new Date(t.due_at),config.timeZone)<=day))[0];
+      if(first)keyboard.text('▶️ Начну с главного','start:'+first.id).row();
+    }else{
+      const outstanding=store.list().some(t=>t.status==='active'&&t.due_at&&localDate(new Date(t.due_at),config.timeZone)<=today());
+      if(outstanding)keyboard.text('📅 Перенести оставшееся','evening:open').row();
+    }
+    keyboard.text('📋 Мои задачи','list:open');
+    await bot.api.sendMessage(config.owner,text,{reply_markup:keyboard});
   }
+  bot.callbackQuery('evening:open',async ctx=>{
+    await ctx.answerCallbackQuery();
+    const overdue=rankTasks(store.list().filter(t=>t.due_at&&localDate(new Date(t.due_at),config.timeZone)<=today())).slice(0,10);
+    if(!overdue.length)return ctx.reply('Просроченных задач уже нет.');
+    const keyboard=new InlineKeyboard();
+    overdue.forEach(t=>keyboard.text(t.title.slice(0,45),'move:'+t.id+':tomorrow').row());
+    await ctx.reply('Какую задачу перенести на завтра, 09:00? Можно выбрать по одной.',{reply_markup:keyboard});
+  });
   bot.callbackQuery('list:open',async ctx=>{await ctx.answerCallbackQuery();await showTasks(ctx);});
   return {bot,sendReminder,sendDaily};
 }
