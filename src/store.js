@@ -40,13 +40,14 @@ export function openStore(path, ownerId) {
   if(!columns.includes('postponed_count')) db.exec("ALTER TABLE tasks ADD COLUMN postponed_count INTEGER NOT NULL DEFAULT 0");
   if(!columns.includes('last_reason')) db.exec("ALTER TABLE tasks ADD COLUMN last_reason TEXT");
   if(!columns.includes('started_at')) db.exec("ALTER TABLE tasks ADD COLUMN started_at TEXT");
+  if(!columns.includes('reminder_count')) db.exec("ALTER TABLE tasks ADD COLUMN reminder_count INTEGER NOT NULL DEFAULT 0");
   const now = () => new Date().toISOString();
   const event=(id,action,reason=null)=>db.prepare('INSERT INTO task_events(task_id,action,reason,created_at) VALUES (?,?,?,?)').run(id,action,reason,now());
   const getStatement = db.prepare('SELECT * FROM tasks WHERE id = ? AND owner_id = ?');
   const insert = db.prepare("INSERT INTO tasks (owner_id,title,category,due_at,next_notify_at,status,created_at,priority) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)");
   const updateDone = db.prepare("UPDATE tasks SET status='done', next_notify_at=NULL, completed_at=? WHERE id=? AND owner_id=? AND status='active'");
   const updateSnooze = db.prepare("UPDATE tasks SET next_notify_at=? WHERE id=? AND owner_id=? AND status='active'");
-  const updateSchedule = db.prepare("UPDATE tasks SET due_at=?, next_notify_at=? WHERE id=? AND owner_id=? AND status='active'");
+  const updateSchedule = db.prepare("UPDATE tasks SET due_at=?, next_notify_at=?,reminder_count=0 WHERE id=? AND owner_id=? AND status='active'");
   const selectDue = db.prepare("SELECT * FROM tasks WHERE owner_id=? AND status='active' AND next_notify_at IS NOT NULL AND next_notify_at<=? ORDER BY next_notify_at LIMIT 25");
   const claim = db.prepare("UPDATE tasks SET next_notify_at=? WHERE id=? AND owner_id=? AND status='active' AND next_notify_at=?");
   const store = {
@@ -101,13 +102,13 @@ export function openStore(path, ownerId) {
     },
     started(id) {
       const next=new Date(Date.now()+20*60000).toISOString();
-      const result=db.prepare("UPDATE tasks SET started_at=?,next_notify_at=? WHERE id=? AND owner_id=? AND status='active'").run(now(),next,Number(id),ownerId);
+      const result=db.prepare("UPDATE tasks SET started_at=?,next_notify_at=?,reminder_count=0 WHERE id=? AND owner_id=? AND status='active'").run(now(),next,Number(id),ownerId);
       if(result.changes)event(Number(id),'started');
       return result.changes?store.get(id):null;
     },
     progress(id) {
       const next=new Date(Date.now()+30*60000).toISOString();
-      const result=db.prepare("UPDATE tasks SET progress_count=progress_count+1,next_notify_at=? WHERE id=? AND owner_id=? AND status='active'").run(next,Number(id),ownerId);
+      const result=db.prepare("UPDATE tasks SET progress_count=progress_count+1,next_notify_at=?,reminder_count=0 WHERE id=? AND owner_id=? AND status='active'").run(next,Number(id),ownerId);
       if(result.changes)event(Number(id),'progress');
       return result.changes?store.get(id):null;
     },
@@ -127,6 +128,9 @@ export function openStore(path, ownerId) {
     },
     recentEvents(limit=100) {
       return db.prepare("SELECT e.*,t.title,t.category FROM task_events e INNER JOIN tasks t ON t.id=e.task_id WHERE t.owner_id=? ORDER BY e.created_at DESC LIMIT ?").all(ownerId,limit);
+    },
+    markNotified(id) {
+      db.prepare("UPDATE tasks SET reminder_count=reminder_count+1 WHERE id=? AND owner_id=? AND status='active'").run(Number(id),ownerId);
     },
     due() { return selectDue.all(ownerId, now()); },
     claim(id, currentNext, nextTime) { return claim.run(nextTime, Number(id), ownerId, currentNext).changes > 0; },
