@@ -11,10 +11,16 @@ export function readConfig(env = process.env) {
   if (!Number.isInteger(repeatMinutes) || repeatMinutes < 1 || repeatMinutes > 1440) throw new Error('REMINDER_INTERVAL_MINUTES must be 1–1440');
   const timeZone = env.TZ_NAME || 'Europe/Moscow';
   try { new Intl.DateTimeFormat('ru-RU', { timeZone }); } catch { throw new Error('TZ_NAME must be a valid IANA time zone'); }
+  const morningHour=Number(env.MORNING_HOUR ?? 9);
+  const eveningHour=Number(env.EVENING_HOUR ?? 21);
+  if(![morningHour,eveningHour].every(h=>Number.isInteger(h)&&h>=0&&h<=23))throw new Error('Hours must be in 0–23');
+  const quietFrom=Number(env.QUIET_FROM_HOUR ?? 23);
+  const quietUntil=Number(env.QUIET_UNTIL_HOUR ?? 8);
+  if(![quietFrom,quietUntil].every(h=>Number.isInteger(h)&&h>=0&&h<=23))throw new Error('Quiet hours must be 0–23');
   const publicUrl = (env.PUBLIC_URL || '').trim().replace(/\/$/, '');
   if (publicUrl && !/^https:\/\//.test(publicUrl)) throw new Error('PUBLIC_URL must be HTTPS');
   return {
-    botToken, owner, port, repeatMinutes, timeZone, publicUrl,
+    botToken, owner, port, repeatMinutes, timeZone, publicUrl, morningHour, eveningHour, quietFrom, quietUntil,
     databasePath: env.DATABASE_PATH || './data/tasks.sqlite',
     integrationKey: (env.INTEGRATION_API_KEY || '').trim()
   };
