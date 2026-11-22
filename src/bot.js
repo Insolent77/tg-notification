@@ -1,3 +1,4 @@
+import {assistantReply} from './assistant.js';
 import { Bot, InlineKeyboard, Keyboard } from 'grammy';
 import { localDate, localTime, localToIso, shiftLocalDate } from './dates.js';
 import {rankTasks, morningBrief,eveningBrief,behavioralHint,priorityLabel} from './secretary.js';
@@ -58,7 +59,13 @@ export function createBot(config, store) {
 
   bot.on('message:text',async ctx=>{
     const state=flows.get(ctx.from.id);
-    if (!state) return;
+    if (!state) {
+      if(config.openaiApiKey){
+        try {const answer=await assistantReply(config,store,text);if(answer)await ctx.reply(answer.slice(0,4000));}
+        catch(e){console.error('Assistant response error:',e.message);await ctx.reply('Сейчас не могу ответить через ИИ. Но задачи и напоминания работают. Попробуй ещё раз позже.');}
+      } else await ctx.reply('Можешь открыть список дел или создать новую задачу. Для свободного диалога потребуется OPENAI_API_KEY.');
+      return;
+    }
     const text=ctx.message.text.trim();
     if(state.step==='reschedule-custom') {
       const match=text.match(/^(\d{4}-\d{2}-\d{2})\s+([01]\d|2[0-3]):([0-5]\d)$/);
