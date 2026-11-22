@@ -1,0 +1,74 @@
+openapi: 3.1.0
+info:
+  title: TG Notification - personal tasks
+  version: 1.0.0
+  description: Private API for creating and reading tasks in the Telegram reminders bot.
+servers:
+  - url: https://REPLACE_WITH_YOUR_HTTPS_DOMAIN
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+  schemas:
+    TaskInput:
+      type: object
+      required: [title]
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Short task title in Russian or any language.
+        category:
+          type: string
+          description: Category (Личное, Дом, Работа, Автомобиль, etc.).
+          default: Личное
+          maxLength: 40
+        due_at:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp with explicit timezone, such as 2026-11-23T18:00:00+03:00. Omit for a task without reminders.
+paths:
+  /api/integration/tasks:
+    get:
+      operationId: listTasks
+      summary: List personal tasks
+      security: [{ apiKey: [] }]
+      responses:
+        '200':
+          description: Stored tasks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+    post:
+      operationId: createTask
+      summary: Create a task or reminder
+      description: When the user asks to create a task, send the title, optional category, and optional timezone-aware due_at. The server sends Telegram reminders until done. Never say a task was saved unless this API returns success.
+      security: [{ apiKey: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskInput'
+      responses:
+        '201':
+          description: Task successfully created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task:
+                    type: object
+                    additionalProperties: true
+        '400': {description: Invalid task parameters}
+        '401': {description: Invalid bearer token}
+        '503': {description: API key not configured}
