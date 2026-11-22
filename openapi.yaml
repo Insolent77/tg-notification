@@ -21,6 +21,11 @@ components:
           minLength: 1
           maxLength: 200
           description: Short task title in Russian or any language.
+        priority:
+          type: string
+          enum: [high, medium, low]
+          default: medium
+          description: User-provided task priority. High, medium or low.
         category:
           type: string
           description: Category (Личное, Дом, Работа, Автомобиль, etc.).
@@ -50,7 +55,7 @@ paths:
     post:
       operationId: createTask
       summary: Create a task or reminder
-      description: When the user asks to create a task, send the title, optional category, and optional timezone-aware due_at. The server sends Telegram reminders until done. Never say a task was saved unless this API returns success.
+      description: When the user asks to create a task, send the title, optional category, optional priority, and optional timezone-aware due_at. The server sends Telegram reminders until done. Never say a task was saved unless this API returns success.
       security: [{ apiKey: [] }]
       requestBody:
         required: true
