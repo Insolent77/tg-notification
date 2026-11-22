@@ -35,7 +35,7 @@ export function openStore(path, ownerId) {
       if (!cleanTitle || cleanTitle.length > 200) throw new Error('Название задачи должно содержать 1–200 символов');
       if (!cleanCategory || cleanCategory.length > 40) throw new Error('Категория должна содержать 1–40 символов');
       let iso = null;
-      if (dueAt !== null && dueAt !== '') {
+      if (dueAt != null && dueAt !== '') {
         if (typeof dueAt !== 'string' || !/(Z|[+-]\d\d:\d\d)$/.test(dueAt)) throw new Error('Укажите дату ISO 8601 с часовым поясом');
         const timestamp = Date.parse(dueAt);
         if (!Number.isFinite(timestamp)) throw new Error('Неверная дата');
