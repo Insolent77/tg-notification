@@ -26,6 +26,7 @@ export function openStore(path, ownerId) {
   const insert = db.prepare('INSERT INTO tasks (owner_id,title,category,due_at,next_notify_at,status,created_at) VALUES (?, ?, ?, ?, ?, \'active\', ?)');
   const updateDone = db.prepare("UPDATE tasks SET status='done', next_notify_at=NULL, completed_at=? WHERE id=? AND owner_id=? AND status='active'");
   const updateSnooze = db.prepare("UPDATE tasks SET next_notify_at=? WHERE id=? AND owner_id=? AND status='active'");
+  const updateSchedule = db.prepare("UPDATE tasks SET due_at=?, next_notify_at=? WHERE id=? AND owner_id=? AND status='active'");
   const selectDue = db.prepare("SELECT * FROM tasks WHERE owner_id=? AND status='active' AND next_notify_at IS NOT NULL AND next_notify_at<=? ORDER BY next_notify_at LIMIT 25");
   const claim = db.prepare("UPDATE tasks SET next_notify_at=? WHERE id=? AND owner_id=? AND status='active' AND next_notify_at=?");
   const store = {
@@ -52,6 +53,14 @@ export function openStore(path, ownerId) {
       if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) throw new Error('Неверное время откладывания');
       const nextAt = new Date(Date.now() + minutes * 60000).toISOString();
       const result = updateSnooze.run(nextAt, Number(id), ownerId);
+      return result.changes ? store.get(id) : null;
+    },
+    reschedule(id, dueAt) {
+      if (typeof dueAt !== 'string' || !Number.isFinite(Date.parse(dueAt))) throw new Error('Неверная дата');
+      const timestamp = Date.parse(dueAt);
+      if (timestamp <= Date.now()) throw new Error('Время должно быть в будущем');
+      const iso = new Date(timestamp).toISOString();
+      const result = updateSchedule.run(iso, iso, Number(id), ownerId);
       return result.changes ? store.get(id) : null;
     },
     due() { return selectDue.all(ownerId, now()); },
