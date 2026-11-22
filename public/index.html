@@ -24,6 +24,10 @@
       <button class="tab" data-tab="tomorrow">Завтра</button>
       <button class="tab" data-tab="all">Все задачи</button>
     </nav>
+    <section class="focus-panel" id="focus-panel">
+      <div class="focus-heading"><span>✦</span><strong>На чём сосредоточиться</strong></div>
+      <div id="focus-tasks" class="focus-tasks"></div>
+    </section>
     <div class="categories" id="categories"></div>
     <div class="section-head"><h2 id="section-title">Сегодня</h2><span id="visible-count" class="pill">0</span></div>
     <section id="task-list" class="task-list" aria-live="polite"></section>
@@ -36,11 +40,31 @@
       <label for="title">Название</label><input id="title" name="title" required maxlength="200" placeholder="Что нужно сделать?" />
       <label for="category">Категория</label><input id="category" name="category" maxlength="40" list="category-options" value="Личное" required />
       <datalist id="category-options"><option value="Личное"><option value="Работа"><option value="Дом"><option value="Автомобиль"></datalist>
+      <label for="priority">Приоритет</label>
+      <select id="priority" name="priority"><option value="high">🔴 Важно</option><option value="medium" selected>🟡 Обычная</option><option value="low">⚪ Не срочно</option></select>
       <label class="check-label"><input id="remind" type="checkbox" checked /> Напомнить в указанное время</label>
       <label for="date-time" id="date-time-label">Дата и время</label><input id="date-time" type="datetime-local" required />
       <p class="hint">Если не отметишь задачу выполненной, бот повторит напоминание через 10 минут.</p>
       <button class="submit" type="submit">Сохранить задачу</button>
       <p id="form-error" class="error" role="alert" hidden></p>
+    </form>
+  </dialog>
+  <dialog id="move-dialog">
+    <form id="move-form">
+      <div class="dialog-head"><h2>Перенести задачу</h2><button type="button" id="move-close" class="close" aria-label="Закрыть">×</button></div>
+      <p id="move-task-title" class="muted"></p>
+      <label for="move-reason">Что мешает? (необязательно)</label>
+      <select id="move-reason"><option value="busy">Занят другим</option><option value="tired">Нет сил</option><option value="stuck">Не знаю, с чего начать</option><option value="avoid">Не хочу сейчас</option></select>
+      <div class="move-presets">
+        <button type="button" data-minutes="10">10 мин</button>
+        <button type="button" data-minutes="30">30 мин</button>
+        <button type="button" data-minutes="60">1 час</button>
+        <button type="button" id="move-tomorrow">Завтра, 09:00</button>
+      </div>
+      <label for="move-time">Или выбрать дату и время</label>
+      <input id="move-time" type="datetime-local" required>
+      <button class="submit" type="submit">Перенести</button>
+      <p class="error" id="move-error" role="alert" hidden></p>
     </form>
   </dialog>
 </body>
