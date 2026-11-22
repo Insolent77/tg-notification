@@ -58,6 +58,7 @@ export function createBot(config, store) {
   bot.hears('📋 Мои задачи',showTasks);
 
   bot.on('message:text',async ctx=>{
+    const text=ctx.message.text.trim();
     const state=flows.get(ctx.from.id);
     if (!state) {
       if(config.openaiApiKey){
@@ -66,7 +67,6 @@ export function createBot(config, store) {
       } else await ctx.reply('Можешь открыть список дел или создать новую задачу. Для свободного диалога потребуется OPENAI_API_KEY.');
       return;
     }
-    const text=ctx.message.text.trim();
     if(state.step==='reschedule-custom') {
       const match=text.match(/^(\d{4}-\d{2}-\d{2})\s+([01]\d|2[0-3]):([0-5]\d)$/);
       if(!match)return ctx.reply('Напиши дату и время одним сообщением: 2026-11-24 18:30');
