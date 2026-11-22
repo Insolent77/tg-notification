@@ -1,11 +1,11 @@
 // Optional conversational layer. Task scheduling always stays in the deterministic backend.
 const history=new Map();
-export async function assistantReply(config,store,userText){
+export async function assistantReply(config,store,userText,sender=config.owner){
   if(!config.openaiApiKey)return null;
-  const current=store.list().filter(t=>t.status==='active').slice(0,15).map(t=>({
+  const current=sender!==config.owner?[]:store.list().filter(t=>t.status==='active').slice(0,15).map(t=>({
     title:t.title,priority:t.priority,due_at:t.due_at,progress:t.progress_count,postponed:t.postponed_count,last_reason:t.last_reason
   }));
-  const recent=store.recentEvents(30).map(e=>({action:e.action,reason:e.reason,task:e.title})).slice(0,15);
+  const recent=sender!==config.owner?[]:store.recentEvents(30).map(e=>({action:e.action,reason:e.reason,task:e.title})).slice(0,15);
   const instructions=[
     'Ты личный секретарь одного человека. Отвечай по-русски, коротко, естественно, с умеренным юмором.',
     'Помогай расставлять приоритеты, начинать конкретные действия и честно оценивать, что сделано.',
@@ -15,7 +15,7 @@ export async function assistantReply(config,store,userText){
     'Не выдумывай данные и не делай выводов о привычках без повторяющихся примеров.',
     'Никаких лишних вступлений. Обычно достаточно 2–5 предложений.'
   ].join(' ');
-  const previous=history.get(config.owner)||[];
+  const previous=history.get(sender)||[];
   const input=[
     ...previous,
     {role:'user',content:'Мои актуальные задачи: '+JSON.stringify(current)+'\nПоследние действия: '+JSON.stringify(recent)+'\n\nМоё сообщение: '+userText.slice(0,1000)}
@@ -32,7 +32,7 @@ export async function assistantReply(config,store,userText){
     const body=await response.json();
     const reply=(body.output||[]).flatMap(x=>x.content||[]).filter(x=>x.type==='output_text').map(x=>x.text).join('\n').trim();
     if(!reply)throw new Error('OpenAI API response did not contain text');
-    history.set(config.owner,[...previous,{role:'user',content:userText.slice(0,1000)},{role:'assistant',content:reply}].slice(-8));
+    history.set(sender,[...previous,{role:'user',content:userText.slice(0,1000)},{role:'assistant',content:reply}].slice(-8));
     return reply;
   }finally{clearTimeout(timeout);}
 }

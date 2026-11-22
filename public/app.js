@@ -1,13 +1,13 @@
+import {localDate,localTime,localToIso,shiftLocalDate} from './dates.js';
 const tg=window.Telegram?.WebApp;
 tg?.ready();
 tg?.expand();
 const state={tasks:[],recommended:[],tab:'today',category:'Все',movingId:null};
 const $=id=>document.getElementById(id);
 const labels={today:'Сегодня',tomorrow:'Завтра',all:'Все задачи'};
-const dateKey=date=>[date.getFullYear(),String(date.getMonth()+1).padStart(2,'0'),String(date.getDate()).padStart(2,'0')].join('-');
-const today=dateKey(new Date());
-const tomorrow=dateKey(new Date(Date.now()+86400000));
-$('today-label').textContent=new Intl.DateTimeFormat('ru-RU',{weekday:'long',day:'numeric',month:'long'}).format(new Date());
+const dateKey=date=>localDate(date,state.zone);
+const inputValue=date=>dateKey(date)+'T'+localTime(date,state.zone);
+const fromInput=value=>localToIso(...value.split('T'),state.zone);
 function showError(message,id='error'){const el=$(id);el.hidden=!message;el.textContent=message||'';}
 async function request(path,options={}) {
   if(!tg?.initData)throw new Error('Открой приложение через кнопку в Telegram.');
@@ -31,7 +31,8 @@ function filtered() {
     if(state.tab==='all')return true;
     if(!t.due_at)return false;
     const key=dateKey(new Date(t.due_at));
-    return key===(state.tab==='today'?today:tomorrow);
+    const today=dateKey(new Date());
+    return key===(state.tab==='today'?today:shiftLocalDate(today,1));
   });
 }
 function renderCategories() {
@@ -45,7 +46,7 @@ function renderCategories() {
 }
 function formatDue(value){
   if(!value)return 'Без напоминания';
-  return '◷ '+new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}).format(new Date(value));
+  return '◷ '+new Intl.DateTimeFormat('ru-RU',{timeZone:state.zone,day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}).format(new Date(value));
 }
 async function doAction(id,action){
   try {await request('/api/tasks/'+id+'/'+action,{method:'POST'});await refresh();}
@@ -63,7 +64,7 @@ function openMove(id){
   $('move-task-title').textContent=task.title;
   $('move-error').hidden=true;
   const date=new Date(Date.now()+3600000);
-  $('move-time').value=new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  $('move-time').value=inputValue(date);
   moveDialog.showModal();
 }
 async function reschedule(due_at){
@@ -75,14 +76,13 @@ async function reschedule(due_at){
 $('move-close').onclick=()=>moveDialog.close();
 document.querySelectorAll('[data-minutes]').forEach(btn=>btn.onclick=()=>reschedule(new Date(Date.now()+Number(btn.dataset.minutes)*60000).toISOString()));
 $('move-tomorrow').onclick=()=>{
-  const tomorrow=new Date();tomorrow.setDate(tomorrow.getDate()+1);tomorrow.setHours(9,0,0,0);
-  reschedule(tomorrow.toISOString());
+  reschedule(localToIso(shiftLocalDate(dateKey(new Date()),1),'09:00',state.zone));
 };
 $('move-form').onsubmit=e=>{
   e.preventDefault();
   const value=$('move-time').value;
   if(!value)return;
-  reschedule(new Date(value).toISOString());
+  try{reschedule(fromInput(value));}catch(error){showError(error.message,'move-error');}
 };
 function renderFocus(){
   const root=$('focus-tasks');root.replaceChildren();
@@ -151,14 +151,14 @@ function render() {
   }
 }
 async function refresh(){
-  try{const data=await request('/api/tasks');state.tasks=data.tasks;state.recommended=data.recommended||[];showError('');render();}
+  try{const data=await request('/api/tasks');state.zone=data.timeZone;$('today-label').textContent=dateKey(new Date())+' · '+state.zone;$('add-button').disabled=false;state.tasks=data.tasks;state.recommended=data.recommended||[];showError('');render();}
   catch(e){showError(e.message);}
 }
 document.querySelectorAll('.tab').forEach(btn=>btn.onclick=()=>{state.tab=btn.dataset.tab;state.category='Все';render();});
 const dialog=$('task-dialog');
 $('add-button').onclick=()=>{
   $('task-form').reset();
-  $('date-time').value=new Date(Date.now()+3600000-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);
+  $('date-time').value=inputValue(new Date(Date.now()+3600000));
   $('date-time').disabled=false;
   $('date-time').required=true;
   $('category').value='Личное';
@@ -177,10 +177,11 @@ $('task-form').onsubmit=async event=>{
   const title=$('title').value.trim();
   const category=$('category').value.trim()||'Личное';
   const priority=$('priority').value;
-  const when=$('remind').checked?new Date($('date-time').value).toISOString():null;
   try {
+    const when=$('remind').checked?fromInput($('date-time').value):null;
     await request('/api/tasks',{method:'POST',body:JSON.stringify({title,category,priority,due_at:when})});
     dialog.close();await refresh();
   } catch(e){showError(e.message,'form-error');}
 };
+$('add-button').disabled=true;
 refresh();

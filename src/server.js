@@ -25,16 +25,19 @@ export function createServer(config,store) {
   const app=express();
   app.disable('x-powered-by');
   app.use(express.json({limit:'16kb'}));
+  app.get('/dates.js',(_req,res)=>res.sendFile(join(process.cwd(),'src','dates.js')));
   app.get('/health',(_req,res)=>res.json({ok:true}));
   const tgAuth=(req,res,next)=>{
     if(!verifyTelegramInitData(req.get('X-Telegram-Init-Data'),config.botToken,config.owner)) return res.status(401).json({error:'Unauthorized'});
     next();
   };
-  const integrationAuth=(req,res,next)=>{
-    if(!config.integrationKey || config.integrationKey.length<24) return res.status(503).json({error:'Integration API is not configured'});
-    const supplied=req.get('Authorization')?.replace(/^Bearer /i,'')||'';
-    const a=Buffer.from(supplied),b=Buffer.from(config.integrationKey);
-    if(a.length!==b.length||!crypto.timingSafeEqual(a,b))return res.status(401).json({error:'Unauthorized'});
+  const integrationAuth=(...keys)=>(req,res,next)=>{
+    const enabled=keys.filter(key=>key && key.length>=24);
+    if(!enabled.length)return res.status(503).json({error:'Integration disabled'});
+    const match=/^Bearer (\S+)$/i.exec(req.get('Authorization')||'');
+    const supplied=Buffer.from(match?.[1]||'');
+    if(!enabled.some(key=>{const expected=Buffer.from(key);return supplied.length===expected.length && crypto.timingSafeEqual(supplied,expected);}))
+      return res.status(401).json({error:'Unauthorized'});
     next();
   };
   const create=(req,res)=>{
@@ -42,8 +45,8 @@ export function createServer(config,store) {
     const task=store.create({title,category,dueAt:due_at,priority});
     res.status(201).json({task});
   };
-  app.get('/api/tasks',tgAuth,(_req,res)=>res.json({tasks:store.list(),recommended:rankTasks(store.list().filter(t=>t.due_at && localDate(new Date(t.due_at),config.timeZone)<=localDate(new Date(),config.timeZone))).slice(0,3).map(t=>t.id)}));
-  app.get('/api/briefing',tgAuth,(_req,res)=>res.json({morning:morningBrief(store.list(),config.timeZone),evening:eveningBrief(store.list(),config.timeZone)}));
+  app.get('/api/tasks',tgAuth,(_req,res)=>res.json({timeZone:config.timeZone,tasks:store.list(),recommended:rankTasks(store.list().filter(t=>t.due_at && localDate(new Date(t.due_at),config.timeZone)<=localDate(new Date(),config.timeZone))).slice(0,3).map(t=>t.id)}));
+  app.get('/api/briefing',tgAuth,(_req,res)=>res.json({morning:morningBrief(store.list(),config.timeZone),evening:eveningBrief(store.list(),config.timeZone,new Date(),store.eventsSince(new Date(Date.now()-48*3600000).toISOString()))}));
   const updateTask=(action)=>withErrors((req,res)=>{
     const id=Number(req.params.id);
     const task=action(id,req.body||{});
@@ -66,8 +69,8 @@ export function createServer(config,store) {
     if(!task) return res.status(404).json({error:'Active task not found'});
     res.json({task});
   }));
-  app.get('/api/integration/tasks',integrationAuth,(_req,res)=>res.json({tasks:store.list()}));
-  app.post('/api/integration/tasks',integrationAuth,withErrors(create));
+  app.get('/api/integration/tasks',integrationAuth(config.integrationKey),(_req,res)=>res.json({tasks:store.list()}));
+  app.post('/api/integration/tasks',integrationAuth(config.integrationKey,config.createKey),withErrors(create));
   app.use(express.static(join(process.cwd(),'public'),{index:'index.html'}));
   app.use((err,_req,res,_next)=>{
     if(err.type==='entity.parse.failed')return res.status(400).json({error:'Malformed JSON'});

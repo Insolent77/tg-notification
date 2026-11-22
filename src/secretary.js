@@ -8,7 +8,7 @@ export function rankTasks(tasks,now=new Date()){
     const due=t.due_at?Date.parse(t.due_at):Infinity;
     const hours=(due-now.getTime())/3600000;
     const urgency=hours<=0?40:hours<=3?25:hours<=24?12:0;
-    return priority+urgency+Math.min(12,(t.postponed_count||0)*2);
+    return priority+urgency;
   };
   return active.sort((a,b)=>score(b)-score(a)||(Date.parse(a.due_at||'9999')-Date.parse(b.due_at||'9999')));
 }
@@ -20,13 +20,16 @@ export function morningBrief(tasks,timeZone,now=new Date()){
   const top=ranked.slice(0,3);
   return 'Доброе утро! Сегодня '+ranked.length+' '+(ranked.length===1?'дело':'дел')+' в плане.\n\nЯ бы сосредоточился на этих:\n'+top.map((t,i)=>(i+1)+'. '+t.title+' ('+priorityLabel(t.priority)+')').join('\n')+'\n\nНе обязательно хвататься за всё сразу. Начнём с первого?';
 }
-export function eveningBrief(tasks,timeZone,now=new Date()){
+export function eveningBrief(tasks,timeZone,now=new Date(),events=[]){
   const day=localDate(now,timeZone);
   const done=tasks.filter(t=>t.completed_at&&localDate(new Date(t.completed_at),timeZone)===day);
   const unfinished=tasks.filter(t=>t.status==='active'&&t.due_at&&localDate(new Date(t.due_at),timeZone)<=day);
-  const progressed=tasks.filter(t=>t.status==='active'&&t.progress_count>0&&t.due_at&&localDate(new Date(t.due_at),timeZone)<=day);
+  const dayEvents=events.filter(e=>localDate(new Date(e.created_at),timeZone)===day);
+  const progressed=new Set(dayEvents.filter(e=>e.action==='progress').map(e=>e.task_id));
+  const moved=new Set(dayEvents.filter(e=>e.action==='reschedule').map(e=>e.task_id));
   let result='Итоги дня: выполнено '+done.length+', осталось '+unfinished.length+'.';
-  if(progressed.length)result+=' Есть продвижение по '+progressed.length+' задачам — это тоже результат.';
+  if(moved.size)result+=' Перенесено: '+moved.size+'.';
+  if(progressed.size)result+=' Есть продвижение по '+progressed.size+' задачам — это тоже результат.';
   if(unfinished.length)result+='\n\nОсталось: '+rankTasks(unfinished,now).slice(0,3).map(t=>t.title).join('; ')+'.\nМожно перенести их на завтра, если сегодня уже неактуально.';
   else if(done.length)result+='\nХорошо поработал. На сегодня можно закрывать список.';
   return result;

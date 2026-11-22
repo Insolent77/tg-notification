@@ -1,3 +1,4 @@
+import {parseRequest, transcribe} from './intake.js';
 import {assistantReply} from './assistant.js';
 import { Bot, InlineKeyboard, Keyboard } from 'grammy';
 import { localDate, localTime, localToIso, shiftLocalDate } from './dates.js';
@@ -6,9 +7,17 @@ import {rankTasks, morningBrief,eveningBrief,behavioralHint,priorityLabel} from 
 const categories = ['Личное','Работа','Дом','Автомобиль'];
 const safeText = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-export function createBot(config, store) {
-  const bot = new Bot(config.botToken);
+export function createBot(config, store, options) {
+  const bot = new Bot(config.botToken,options);
   const flows = new Map();
+  const mutable=/^(?:start|progress|cant|done|confirmdone|reason|move|unschedule|snooze|delay):(\d+)(?::|$)/;
+  bot.api.config.use((prev,method,payload,signal)=>{
+    for(const row of payload.reply_markup?.inline_keyboard || []) for(const button of row){
+      const match=mutable.exec(button.callback_data||'');
+      if(match)button.callback_data+='~'+store.get(match[1])?.revision;
+    }
+    return prev(method,payload,signal);
+  });
   const today = () => localDate(new Date(), config.timeZone);
   const menu = () => {
     const k = new Keyboard().text('➕ Создать задачку').text('📋 Мои задачи').row();
@@ -21,7 +30,7 @@ export function createBot(config, store) {
   const priorityButtons = () => new InlineKeyboard().text('🔴 Важно','priority:high').text('🟡 Обычно','priority:medium').row().text('⚪ Не срочно','priority:low');
   const postButtons = id => new InlineKeyboard()
     .text('10 мин','move:'+id+':10').text('30 мин','move:'+id+':30').text('1 час','move:'+id+':60').row()
-    .text('Завтра в 09:00','move:'+id+':tomorrow').row().text('📅 Своя дата и время','move:'+id+':custom');
+    .text('Завтра в 09:00','move:'+id+':tomorrow').row().text('📅 Своя дата и время','move:'+id+':custom').row().text('Оставить без напоминания','unschedule:'+id);
   const whenLabel = task => task.due_at?localDate(new Date(task.due_at),config.timeZone)+' '+localTime(new Date(task.due_at),config.timeZone):'без напоминания';
   const showTasks = async ctx => {
     const tasks = rankTasks(store.list());
@@ -36,10 +45,47 @@ export function createBot(config, store) {
     return ctx.reply(message, {parse_mode:'HTML'});
   };
   bot.use(async (ctx,next) => {
+    if (ctx.chat?.type !== 'private') return;
+    if (ctx.message?.text === '/id') return ctx.reply('Твой Telegram ID: '+ctx.from.id);
+    const guest = ctx.from?.id === config.guest && ctx.from.id !== config.owner;
+    if (guest || (ctx.from?.id === config.owner && !flows.has(ctx.from.id))) {
+      if (ctx.message?.voice || (ctx.message?.text && (guest || /^(?:\/task |поставь|создай|добавь|напомни)/iu.test(ctx.message.text)))) {
+        let message = ctx.message.text;
+        if (!message) {
+          try { message = await transcribe(ctx,config); }
+          catch { return ctx.reply('Не удалось распознать голосовое. Проверь подключение распознавания или отправь текст.'); }
+        }
+        let input;
+        try { input = parseRequest(message.trim(),config.timeZone); }
+        catch (error) { return ctx.reply(error.message); }
+        if (input) {
+          let task;
+          try { task = store.createFromMessage(ctx.chat.id,ctx.message.message_id,input); }
+          catch (error) { return ctx.reply(error.message); }
+          return ctx.reply('Записано: «'+task.title+'», '+whenLabel(task)+' ('+config.timeZone+').');
+        }
+        if (guest || ctx.message.voice) {
+          if (!message.startsWith('/') && config.openaiApiKey) {
+            try { return ctx.reply(await assistantReply(config,store,message,ctx.from.id)); }
+            catch { return ctx.reply('Сейчас не получается ответить. Попробуй позже.'); }
+          }
+          return ctx.reply('Напиши «Поставь задачу купить масло завтра в 18:00». Для свободных вопросов нужен подключённый ИИ.');
+        }
+      }
+      if (guest) return;
+    }
     if (ctx.from?.id !== config.owner) {
       if (ctx.message) await ctx.reply('Этот бот предназначен только для владельца.');
       else if (ctx.callbackQuery) await ctx.answerCallbackQuery({text:'Нет доступа',show_alert:true});
       return;
+    }
+    const data=ctx.callbackQuery?.data;
+    if(data && mutable.test(data.split('~')[0])){
+      const [action,version]=data.split('~');
+      const task=store.get(mutable.exec(action)[1]);
+      if(!task || task.status!=='active' || String(task.revision)!==version)
+        return ctx.answerCallbackQuery({text:'Кнопка устарела. Открой актуальную задачу в Mini App.'});
+      ctx.callbackQuery.data=action;
     }
     await next();
   });
@@ -47,7 +93,7 @@ export function createBot(config, store) {
   bot.command('id',ctx=>ctx.reply('Твой Telegram ID: '+ctx.from.id));
   bot.command('tasks',showTasks);
   bot.command('plan',ctx=>ctx.reply(morningBrief(store.list(),config.timeZone)));
-  bot.command('summary',ctx=>ctx.reply(eveningBrief(store.list(),config.timeZone)));
+  bot.command('summary',ctx=>ctx.reply(eveningBrief(store.list(),config.timeZone,new Date(),store.eventsSince(new Date(Date.now()-48*3600000).toISOString()))));
   bot.command('cancel',ctx=>{flows.delete(ctx.from.id);return ctx.reply('Создание задачи отменено.',{reply_markup:menu()});});
   const start = async ctx => {
     flows.set(ctx.from.id,{step:'title'});
@@ -72,6 +118,7 @@ export function createBot(config, store) {
       if(!match)return ctx.reply('Напиши дату и время одним сообщением: 2026-11-24 18:30');
       try{
         const dueAt=localToIso(match[1],match[2]+':'+match[3],config.timeZone);
+        if(store.get(state.taskId)?.revision!==state.revision){flows.delete(ctx.from.id);return ctx.reply('Задача уже изменилась. Открой её снова.');}
         const task=store.reschedule(state.taskId,dueAt,state.reason||'busy');
         if(!task){flows.delete(ctx.from.id);return ctx.reply('Эта задача уже выполнена.');}
         flows.delete(ctx.from.id);
@@ -177,7 +224,7 @@ export function createBot(config, store) {
     const state=flows.get(ctx.from.id);
     const reason=state?.taskId===id?state.reason:'busy';
     if(choice==='custom'){
-      flows.set(ctx.from.id,{step:'reschedule-custom',taskId:id,reason});
+      flows.set(ctx.from.id,{step:'reschedule-custom',taskId:id,reason,revision:task.revision});
       return ctx.reply('Напиши новую дату и время одним сообщением в формате 2026-11-24 18:30. Часовой пояс: '+config.timeZone);
     }
     let dueAt;
@@ -222,16 +269,22 @@ export function createBot(config, store) {
     await ctx.answerCallbackQuery({text:task?'Отложено':'Задача уже завершена'});
     if(task) await ctx.editMessageText('⏰ «'+task.title+'» отложена на '+ctx.match[2]+' минут.').catch(()=>{});
   });
+  bot.callbackQuery(/^unschedule:(\d+)$/,async ctx=>{
+    store.unschedule(Number(ctx.match[1]));
+    flows.delete(ctx.from.id);
+    await ctx.answerCallbackQuery({text:'Задача осталась в списке без напоминания'});
+  });
   bot.callbackQuery('noop',ctx=>ctx.answerCallbackQuery());
   async function sendReminder(task) {
     const hint=behavioralHint(task,store.recentEvents(40));
     const count=task.reminder_count||0;
     const intro=count===0?'🔔 <b>Вернёмся к делу?</b>':count===1?'🔔 <b>Есть минутка на это дело?</b>':count<4?'🔔 <b>Задача всё ещё ждёт</b>':'🔔 <b>Похоже, сейчас не до этой задачи</b>';
-    const suggestion=count>=3?'Если время неподходящее, нажми «Пока не могу» — выберем другое.':'Можешь начать сейчас или выбрать другое время.';
-    await bot.api.sendMessage(config.owner,intro+'\n\n<b>'+safeText(task.title)+'</b>\n'+priorityLabel(task.priority)+' · '+safeText(task.category)+'\n\n'+suggestion+(hint?'\n\n'+safeText(hint):''),{parse_mode:'HTML',reply_markup:actions(task)});
+    const session = !count && {started:'Как продвигается работа?',progress:'Удалось закончить или нужно ещё время?'}[task.followup];
+    const suggestion=session || (count>=3?'Если время неподходящее, нажми «Пока не могу» — выберем другое.':'Можешь начать сейчас или выбрать другое время.');
+    await bot.api.sendMessage(config.owner,(session?'Проверим, как дела':intro)+'\n\n<b>'+safeText(task.title)+'</b>\n'+priorityLabel(task.priority)+' · '+safeText(task.category)+'\n\n'+suggestion+(hint?'\n\n'+safeText(hint):''),{parse_mode:'HTML',reply_markup:actions(task)});
   }
   async function sendDaily(kind){
-    const text=kind==='morning'?morningBrief(store.list(),config.timeZone):eveningBrief(store.list(),config.timeZone);
+    const text=kind==='morning'?morningBrief(store.list(),config.timeZone):eveningBrief(store.list(),config.timeZone,new Date(),store.eventsSince(new Date(Date.now()-48*3600000).toISOString()));
     const keyboard=new InlineKeyboard();
     if(kind==='morning'){
       const day=today();

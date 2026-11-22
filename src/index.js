@@ -25,11 +25,27 @@ async function tick() {
         try{await sendDaily(kind);}catch(err){store.dailyUnclaim(day,kind);console.error('Daily digest failed:',err.message);}
       }
     }
-    if(isQuiet(hour))return;
-    for(const task of store.due()) {
+    const quiet=isQuiet(hour);
+    const due=store.due(quiet);
+    const overnight=due.filter(task=>task.reminder_count>0 && isQuiet(Number(localTime(new Date(task.next_notify_at),config.timeZone).slice(0,2))));
+    if(!quiet && overnight.length>1){
+      const claims=overnight.map(task=>({task,next:new Date(Date.now()+repeatMs(task)).toISOString()}))
+        .filter(({task,next})=>store.claim(task.id,task.next_notify_at,next));
+      if(claims.length){
+        try{
+          await bot.api.sendMessage(config.owner,'После тихих часов ждут '+claims.length+' дел. Открыть список: /tasks');
+          for(const {task,next} of claims)store.markNotified(task.id,next);
+        }catch(err){
+          for(const {task,next} of claims)store.restoreClaim(task.id,next,task.next_notify_at);
+          throw err;
+        }
+      }
+    }
+    for(const task of due) {
+      if(quiet && (task.reminder_count || task.followup!=='due'))continue;
       const next=new Date(Date.now()+repeatMs(task)).toISOString();
       if(!store.claim(task.id,task.next_notify_at,next))continue;
-      try {await sendReminder(task);store.markNotified(task.id);}
+      try {await sendReminder(task);store.markNotified(task.id,next);}
       catch(err) {
         store.restoreClaim(task.id,next,task.next_notify_at);
         console.error('Reminder send failed for task',task.id,err.message);

@@ -19,7 +19,11 @@ export function readConfig(env = process.env) {
   if(![quietFrom,quietUntil].every(h=>Number.isInteger(h)&&h>=0&&h<=23))throw new Error('Quiet hours must be 0–23');
   const publicUrl = (env.PUBLIC_URL || '').trim().replace(/\/$/, '');
   if (publicUrl && !/^https:\/\//.test(publicUrl)) throw new Error('PUBLIC_URL must be HTTPS');
-  return {
+  const guest = Number(env.CONTRIBUTOR_TELEGRAM_ID || 0);
+  if (!Number.isSafeInteger(guest) || guest < 0) throw new Error('Invalid CONTRIBUTOR_TELEGRAM_ID');
+  const createKey = env.CREATE_TASK_API_KEY?.trim();
+  if (createKey && (createKey.length < 32 || createKey === env.INTEGRATION_API_KEY?.trim())) throw new Error('Use an independent CREATE_TASK_API_KEY of at least 32 characters');
+  return {guest, createKey,
     botToken, owner, port, repeatMinutes, timeZone, publicUrl, morningHour, eveningHour, quietFrom, quietUntil,
     databasePath: env.DATABASE_PATH || './data/tasks.sqlite',
     integrationKey: (env.INTEGRATION_API_KEY || '').trim(),
