@@ -27,7 +27,7 @@ export function openStore(path, ownerId) {
   const updateDone = db.prepare("UPDATE tasks SET status='done', next_notify_at=NULL, completed_at=? WHERE id=? AND owner_id=? AND status='active'");
   const updateSnooze = db.prepare("UPDATE tasks SET next_notify_at=? WHERE id=? AND owner_id=? AND status='active'");
   const selectDue = db.prepare("SELECT * FROM tasks WHERE owner_id=? AND status='active' AND next_notify_at IS NOT NULL AND next_notify_at<=? ORDER BY next_notify_at LIMIT 25");
-  const claim = db.prepare("UPDATE tasks SET next_notify_at=? WHERE id=? AND owner_id=? AND status='active' AND next_notify_at<=?");
+  const claim = db.prepare("UPDATE tasks SET next_notify_at=? WHERE id=? AND owner_id=? AND status='active' AND next_notify_at=?");
   const store = {
     create({ title, category='Личное', dueAt=null }) {
       const cleanTitle = String(title || '').trim();
