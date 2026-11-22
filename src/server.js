@@ -1,3 +1,4 @@
+import {rankTasks,morningBrief,eveningBrief} from './secretary.js';
 import express from 'express';
 import crypto from 'node:crypto';
 import { join } from 'node:path';
@@ -36,11 +37,23 @@ export function createServer(config,store) {
     next();
   };
   const create=(req,res)=>{
-    const {title,category,due_at}=req.body||{};
-    const task=store.create({title,category,dueAt:due_at});
+    const {title,category,due_at,priority}=req.body||{};
+    const task=store.create({title,category,dueAt:due_at,priority});
     res.status(201).json({task});
   };
-  app.get('/api/tasks',tgAuth,(_req,res)=>res.json({tasks:store.list()}));
+  app.get('/api/tasks',tgAuth,(_req,res)=>res.json({tasks:store.list(),recommended:rankTasks(store.list()).slice(0,3).map(t=>t.id)}));
+  app.get('/api/briefing',tgAuth,(_req,res)=>res.json({morning:morningBrief(store.list(),config.timeZone),evening:eveningBrief(store.list(),config.timeZone)}));
+  const updateTask=(action)=>withErrors((req,res)=>{
+    const id=Number(req.params.id);
+    const task=action(id,req.body||{});
+    if(!task)return res.status(404).json({error:'Active task not found'});
+    res.json({task});
+  });
+  app.post('/api/tasks/:id/priority',tgAuth,updateTask((id,data)=>store.setPriority(id,data.priority)));
+  app.post('/api/tasks/:id/progress',tgAuth,updateTask(id=>store.progress(id)));
+  app.post('/api/tasks/:id/start',tgAuth,updateTask(id=>store.started(id)));
+  app.post('/api/tasks/:id/reschedule',tgAuth,updateTask((id,data)=>store.reschedule(id,data.due_at,data.reason||'busy')));
+  app.post('/api/tasks/:id/blocker',tgAuth,updateTask((id,data)=>store.noteBlocker(id,data.reason)));
   app.post('/api/tasks',tgAuth,withErrors(create));
   app.post('/api/tasks/:id/done',tgAuth,withErrors((req,res)=>{
     const task=store.done(req.params.id);
@@ -57,7 +70,7 @@ export function createServer(config,store) {
   app.use(express.static(join(process.cwd(),'public'),{index:'index.html'}));
   app.use((err,_req,res,_next)=>{
     if(err.type==='entity.parse.failed')return res.status(400).json({error:'Malformed JSON'});
-    if(err.message && /Название|Категория|дата|Дата|времени|будущем|часовым поясом/.test(err.message))return res.status(400).json({error:err.message});
+    if(err.message && /Название|Категория|дата|Дата|времени|будущем|часовым поясом|приоритет|причина|время|Неверн/.test(err.message))return res.status(400).json({error:err.message});
     console.error('HTTP error:',err);
     res.status(500).json({error:'Internal server error'});
   });
