@@ -225,7 +225,10 @@ export function createBot(config, store) {
   bot.callbackQuery('noop',ctx=>ctx.answerCallbackQuery());
   async function sendReminder(task) {
     const hint=behavioralHint(task,store.recentEvents(40));
-    await bot.api.sendMessage(config.owner,'🔔 <b>Вернёмся к делу?</b>\n\n<b>'+safeText(task.title)+'</b>\n'+priorityLabel(task.priority)+' · '+safeText(task.category)+'\n\nМожешь начать сейчас или выбрать другое время.'+(hint?'\n\n'+safeText(hint):''),{parse_mode:'HTML',reply_markup:actions(task)});
+    const count=task.reminder_count||0;
+    const intro=count===0?'🔔 <b>Вернёмся к делу?</b>':count===1?'🔔 <b>Есть минутка на это дело?</b>':count<4?'🔔 <b>Задача всё ещё ждёт</b>':'🔔 <b>Похоже, сейчас не до этой задачи</b>';
+    const suggestion=count>=3?'Если время неподходящее, нажми «Пока не могу» — выберем другое.':'Можешь начать сейчас или выбрать другое время.';
+    await bot.api.sendMessage(config.owner,intro\n\n<b>'+safeText(task.title)+'</b>\n'+priorityLabel(task.priority)+' · '+safeText(task.category)+'\n\n'+suggestion+(hint?'\n\n'+safeText(hint):''),{parse_mode:'HTML',reply_markup:actions(task)});
   }
   async function sendDaily(kind){
     const text=kind==='morning'?morningBrief(store.list(),config.timeZone):eveningBrief(store.list(),config.timeZone);
