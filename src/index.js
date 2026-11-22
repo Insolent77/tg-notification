@@ -1,3 +1,4 @@
+import {localDate,localTime} from './dates.js';
 import { readConfig } from './config.js';
 import { openStore } from './store.js';
 import { createBot } from './bot.js';
@@ -5,16 +6,28 @@ import { createServer } from './server.js';
 
 const config=readConfig();
 const store=openStore(config.databasePath,config.owner);
-const {bot,sendReminder}=createBot(config,store);
+const {bot,sendReminder,sendDaily}=createBot(config,store);
 const app=createServer(config,store);
 let running=false;
-const repeatMs=config.repeatMinutes*60000;
+const isQuiet=hour=>config.quietFrom===config.quietUntil?false:config.quietFrom<config.quietUntil
+  ?hour>=config.quietFrom&&hour<config.quietUntil
+  :hour>=config.quietFrom||hour<config.quietUntil;
+const repeatMs=task=>({high:config.repeatMinutes,medium:Math.max(30,config.repeatMinutes),low:Math.max(120,config.repeatMinutes)}[task.priority]??30)*60000;
 async function tick() {
   if(running)return;
   running=true;
   try {
+    const now=new Date();
+    const hour=Number(localTime(now,config.timeZone).split(':')[0]);
+    const day=localDate(now,config.timeZone);
+    for (const [kind,target] of [['morning',config.morningHour],['evening',config.eveningHour]]) {
+      if(hour===target && store.dailyClaim(day,kind)){
+        try{await sendDaily(kind);}catch(err){store.dailyUnclaim(day,kind);console.error('Daily digest failed:',err.message);}
+      }
+    }
+    if(isQuiet(hour))return;
     for(const task of store.due()) {
-      const next=new Date(Date.now()+repeatMs).toISOString();
+      const next=new Date(Date.now()+repeatMs(task)).toISOString();
       if(!store.claim(task.id,task.next_notify_at,next))continue;
       try {await sendReminder(task);}
       catch(err) {
