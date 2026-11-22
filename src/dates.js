@@ -1,5 +1,7 @@
 export function localDate(date, timeZone) {
-  return new Intl.DateTimeFormat('en-CA', {timeZone, year:'numeric', month:'2-digit', day:'2-digit'}).format(date);
+  const parts = new Intl.DateTimeFormat('en-GB', {timeZone, year:'numeric', month:'2-digit', day:'2-digit'}).formatToParts(date);
+  const fields=Object.fromEntries(parts.filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));
+  return fields.year+'-'+fields.month+'-'+fields.day;
 }
 export function localTime(date, timeZone) {
   return new Intl.DateTimeFormat('ru-RU', {timeZone, hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(date);
