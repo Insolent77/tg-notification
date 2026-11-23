@@ -215,7 +215,13 @@ export function createBot(config, store, options) {
     await ctx.answerCallbackQuery();
     await updatePrompt(ctx,deleted ? 'Задача «'+task.title+'» удалена.' : 'Задача уже удалена.');
   });
-  bot.command('start',ctx=>ctx.reply('Привет! Я напомню о задачах и буду повторять уведомления до выполнения.\n\nВыбери действие ниже.', {reply_markup:menu()}));
+  bot.command('start',async ctx=>{
+    const greeting='Привет! Я напомню о задачах и буду повторять уведомления до выполнения.';
+    if (!config.publicUrl) return ctx.reply(greeting,{reply_markup:menu()});
+    // Telegram removes an existing reply keyboard only on an explicit removal message.
+    await ctx.reply(greeting,{reply_markup:{remove_keyboard:true}});
+    return ctx.reply('Открыть список задач:',{reply_markup:menu()});
+  });
   bot.command('id',ctx=>ctx.reply('Твой Telegram ID: '+ctx.from.id));
   bot.command('tasks',showTasks);
   bot.command('plan',ctx=>ctx.reply(morningBrief(store.list(),config.timeZone)));
