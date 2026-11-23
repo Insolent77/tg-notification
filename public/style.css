@@ -66,3 +66,10 @@ input:not([type=checkbox]), select { width: 100%; min-width: 0; min-height: 46px
 @media (prefers-reduced-motion: reduce) {
   *, *::before { transition: none !important }
 }
+.priority-picker { border: 0; margin: 14px 0 0; padding: 0; min-width: 0; width: 100%; display: flex; flex-wrap: wrap; gap: 5px }
+.priority-picker legend { padding: 0; margin-bottom: 6px; font-size: 14px; font-weight: 600 }
+.priority-picker label { position: relative; cursor: pointer; flex: 1 0 auto; margin: 0; font-size: 13px }
+.priority-picker input { position: absolute; opacity: 0 }
+.priority-picker span { display: block; text-align: center; padding: 10px 5px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line) }
+.priority-picker input:checked + span { color: var(--mint); border-color: var(--mint) }
+.priority-picker input:focus-visible + span { outline: 2px solid var(--mint); outline-offset: 2px }

@@ -24,6 +24,23 @@ const make=(tag,cls,text)=>{
   if(text!==undefined)el.textContent=text;
   return el;
 };
+const priorityLabels={low:'⚪ Не срочно',medium:'🟡 Обычно',high:'🔴 Важно'};
+function priorityPicker(name, selected){
+  const group=make('fieldset','priority-picker');
+  group.append(make('legend','','Приоритет'));
+  for(const [value,text] of Object.entries(priorityLabels)){
+    const label=make('label');
+    const input=make('input');
+    input.type='radio';
+    input.name=name;
+    input.value=value;
+    input.defaultChecked=value===selected;
+    label.append(input,make('span','',text));
+    group.append(label);
+  }
+  return group;
+}
+$('create-priority').append(priorityPicker('priority','medium'));
 function formatDue(value){
   if(!value)return 'Без напоминания';
   return '◷ '+new Intl.DateTimeFormat('ru-RU',{timeZone:state.zone,day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}).format(new Date(value));
@@ -88,8 +105,8 @@ function render() {
     const content=make('div','task-content');
     content.append(make('div','task-name',task.title));
     const meta=make('div','meta');
-    const priorityName={high:'🔴 Важно',medium:'🟡 Обычно',low:'⚪ Не срочно'}[task.priority]||'🟡 Обычно';
-    meta.append(make('span','',task.category),make('span','',priorityName),make('span','',formatDue(task.due_at)));
+    const badge=make('span','',priorityLabels[task.priority] || priorityLabels.medium);
+    meta.append(make('span','',task.category),badge,make('span','',formatDue(task.due_at)));
     if(task.progress_count)meta.append(make('span','','Прогресс: '+task.progress_count));
     content.append(meta);
     item.append(check,content);
@@ -101,17 +118,21 @@ function render() {
       progress.onclick=()=>doAction(task.id,'progress');
       const delay=make('button','action-button','↷ Перенести');
       delay.onclick=()=>openMove(task.id);
-      const select=make('select','priority-select');
-      [['high','🔴 Важно'],['medium','🟡 Обычно'],['low','⚪ Не срочно']].forEach(([value,label])=>{
-        const option=make('option','',label);option.value=value;select.append(option);
-      });
-      select.value=task.priority||'medium';
-      select.setAttribute('aria-label','Приоритет задачи '+task.title);
-      select.onchange=async()=>{
-        try{await request('/api/tasks/'+task.id+'/priority',{method:'POST',body:JSON.stringify({priority:select.value})});await refresh();}
-        catch(e){showError(e.message);}
+      const picker=priorityPicker('priority-'+task.id,task.priority);
+      picker.onchange=async event=>{
+        const priority=event.target.value;
+        picker.disabled=true;
+        try{
+          const {task:updated}=await request('/api/tasks/'+task.id+'/priority',{method:'POST',body:JSON.stringify({priority})});
+          task.priority=updated.priority;
+          badge.textContent=priorityLabels[task.priority];
+          showError('');
+        }catch(e){
+          picker.querySelector('input[value="'+task.priority+'"]').checked=true;
+          showError(e.message);
+        }finally{picker.disabled=false;}
       };
-      controls.append(begin,progress,delay,select);
+      controls.append(begin,progress,delay,picker);
       const details=make('details');
       details.append(make('summary','','Действия'),controls);
       content.append(details);
@@ -150,7 +171,7 @@ $('task-form').onsubmit=async event=>{
   try {
     const when=$('remind').checked?localToIso($('day').value,$('time').value,state.zone):null;
     const recurrence=when && $('weekly').checked?'weekly':null;
-    await request('/api/tasks',{method:'POST',body:JSON.stringify({title,due_at:when,recurrence})});
+    await request('/api/tasks',{method:'POST',body:JSON.stringify({title,due_at:when,recurrence,priority:$('task-form').elements.priority.value})});
     dialog.close();await refresh();
   } catch(e){showError(e.message,'form-error');} finally {submit.disabled=false;}
 };
