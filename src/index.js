@@ -17,6 +17,7 @@ async function tick() {
   if(running)return;
   running=true;
   try {
+    store.purgeCompleted();
     store.advanceRecurring();
     const now=new Date();
     const hour=Number(localTime(now,config.timeZone).split(':')[0]);

@@ -53,6 +53,17 @@ export function openStore(path, ownerId, timeZone = 'Europe/Moscow') {
   if(!columns.includes('series_id')) db.exec('ALTER TABLE tasks ADD COLUMN series_id INTEGER');
   const now = () => new Date().toISOString();
   const event=(id,action,reason=null)=>db.prepare('INSERT INTO task_events(task_id,action,reason,created_at) VALUES (?,?,?,?)').run(id,action,reason,now());
+  const retentionCutoff = () => new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const expired = "SELECT id FROM tasks WHERE status='done' AND completed_at <= ?";
+  const removeEvents = db.prepare(`DELETE FROM task_events WHERE task_id IN (${expired})`);
+  const removeMessages = db.prepare(`DELETE FROM message_tasks WHERE task_id IN (${expired})`);
+  const removeTasks = db.prepare(`DELETE FROM tasks WHERE id IN (${expired})`);
+  const purgeCompleted = db.transaction(() => {
+    const cutoff = retentionCutoff();
+    removeEvents.run(cutoff);
+    removeMessages.run(cutoff);
+    removeTasks.run(cutoff);
+  });
   const getStatement = db.prepare('SELECT * FROM tasks WHERE id = ? AND owner_id = ?');
   const insert = db.prepare("INSERT INTO tasks (owner_id,title,category,due_at,next_notify_at,status,created_at,priority) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)");
   const updateDone = db.prepare("UPDATE tasks SET status='done', next_notify_at=NULL, completed_at=? WHERE id=? AND owner_id=? AND status='active'");
@@ -124,7 +135,8 @@ export function openStore(path, ownerId, timeZone = 'Europe/Moscow') {
       return task;
     }),
     get(id) { return getStatement.get(Number(id), ownerId) || null; },
-    list() { return db.prepare('SELECT * FROM tasks WHERE owner_id=? ORDER BY status ASC, CASE WHEN due_at IS NULL THEN 1 ELSE 0 END, due_at ASC, created_at DESC').all(ownerId); },
+    purgeCompleted,
+    list() { return db.prepare("SELECT * FROM tasks WHERE owner_id=? AND (status='active' OR completed_at > ?) ORDER BY status ASC, CASE WHEN due_at IS NULL THEN 1 ELSE 0 END, due_at ASC, created_at DESC").all(ownerId,retentionCutoff()); },
     delete(id) {
       return db.transaction(()=>{
         const task=store.get(id);
