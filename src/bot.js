@@ -34,6 +34,58 @@ export function createBot(config, store, options) {
     if (state) state.messageId = message.message_id;
     return message;
   }
+  let pickerSequence = 0;
+  async function calendar(ctx, state, month) {
+    state.pickerMonth = month;
+    const [year, number] = month.split('-').map(Number);
+    const first = new Date(Date.UTC(year, number - 1, 1));
+    const offset = (first.getUTCDay() + 6) % 7;
+    const count = new Date(Date.UTC(year, number, 0)).getUTCDate();
+    const label = new Intl.DateTimeFormat('ru-RU', {month:'long',year:'numeric',timeZone:'UTC'}).format(first);
+    const keyboard = new InlineKeyboard();
+    for (const day of ['Пн','Вт','Ср','Чт','Пт','Сб','Вс']) keyboard.text(day,'noop');
+    keyboard.row();
+    for (let i=0;i<offset;i++) keyboard.text(' ','noop');
+    for (let day=1;day<=count;day++) {
+      const date = month+'-'+String(day).padStart(2,'0');
+      keyboard.text(date<today()?'·':String(day),date<today()?'noop':'pick:'+state.pickerId+':d:'+date);
+      if ((offset+day)%7===0) keyboard.row();
+    }
+    keyboard.row();
+    const prev=shiftLocalDate(month+'-01',-1).slice(0,7);
+    const next=new Date(Date.UTC(year,number,1)).toISOString().slice(0,7);
+    keyboard.text('‹', 'pick:'+state.pickerId+':m:'+prev).text(label,'noop').text('›','pick:'+state.pickerId+':m:'+next);
+    state.step='picker-date';
+    return updatePrompt(ctx,'Выбери дату. Часовой пояс: '+config.timeZone,{reply_markup:keyboard});
+  }
+  async function hours(ctx,state,notice='') {
+    state.step='picker-hour';
+    const keyboard=new InlineKeyboard();
+    for(let h=0;h<24;h++) {
+      const hour=String(h).padStart(2,'0');
+      keyboard.text(hour,'pick:'+state.pickerId+':h:'+hour);
+      if(h%6===5)keyboard.row();
+    }
+    keyboard.text('‹ К календарю','pick:'+state.pickerId+':m:'+state.date.slice(0,7));
+    return updatePrompt(ctx,(notice ? notice+'\n\n' : '')+'Дата: '+state.date+'\nВыбери час ('+config.timeZone+').',{reply_markup:keyboard});
+  }
+  async function minutes(ctx,state) {
+    state.step='picker-minute';
+    const keyboard=new InlineKeyboard();
+    for(let m=0;m<60;m++) {
+      const minute=String(m).padStart(2,'0');
+      keyboard.text(minute,'pick:'+state.pickerId+':n:'+minute);
+      if(m%10===9)keyboard.row();
+    }
+    keyboard.text('‹ К часам','pick:'+state.pickerId+':back');
+    return updatePrompt(ctx,'Дата: '+state.date+' · '+state.hour+':__\nВыбери минуты.',{reply_markup:keyboard});
+  }
+  async function beginPicker(ctx,state,mode,date) {
+    state.pickerId=String(++pickerSequence);
+    state.pickerMode=mode;
+    if(date) {state.date=date; return hours(ctx,state);}
+    return calendar(ctx,state,today().slice(0,7));
+  }
   const today = () => localDate(new Date(), config.timeZone);
   const menu = () => {
     const k = new Keyboard().text('➕ Создать задачку').text('📋 Мои задачи').row();
@@ -117,7 +169,8 @@ export function createBot(config, store, options) {
     const task=store.get(ctx.match[2]);
     flows.set(ctx.from.id,{step:ctx.match[1],taskId:task.id,revision:task.revision,messageId:ctx.callbackQuery.message.message_id});
     await ctx.answerCallbackQuery();
-    await updatePrompt(ctx,ctx.match[1]==='editname'?'Напиши новое название задачи.':'Напиши новую дату и время в формате 2026-11-24 18:30. Часовой пояс: '+config.timeZone);
+    if(ctx.match[1]==='edittime') return beginPicker(ctx,flows.get(ctx.from.id),'edit');
+    await updatePrompt(ctx,'Напиши новое название задачи.');
   });
   bot.callbackQuery(/^delete:(\d+)$/,async ctx=>{
     const task=store.get(ctx.match[1]);
@@ -186,7 +239,7 @@ export function createBot(config, store, options) {
       if (!text || text.length>200) return updatePrompt(ctx,'Название должно содержать от 1 до 200 символов.');
       state.title=text;
       state.step='date';
-      return updatePrompt(ctx,'Когда напомнить?',{reply_markup:new InlineKeyboard().text('Сегодня','date:today').text('Завтра','date:tomorrow').row().text('Без напоминания','date:none').row().text('Ввести дату вручную','date:custom')});
+      return updatePrompt(ctx,'Когда напомнить?',{reply_markup:new InlineKeyboard().text('Сегодня','date:today').text('Завтра','date:tomorrow').row().text('Без напоминания','date:none').row().text('📅 Выбрать дату','date:custom')});
     }
     if (state.step==='custom-date') {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return updatePrompt(ctx,'Напиши дату в формате ГГГГ-ММ-ДД, например 2026-11-24.');
@@ -221,11 +274,49 @@ export function createBot(config, store, options) {
     await ctx.answerCallbackQuery();
     if (!state||state.step!=='date') return;
     const choice=ctx.match[1];
-    if (choice==='custom') {state.step='custom-date';return updatePrompt(ctx,'Напиши дату в формате ГГГГ-ММ-ДД, например 2026-11-24.');}
+    if (choice==='custom') return beginPicker(ctx,state,'create');
     if(choice==='none'){state.dueAt=null;state.step='category';return updatePrompt(ctx,'Выбери категорию:',{reply_markup:categoryButtons()});}
-    state.date=choice==='today'?today():shiftLocalDate(today(),1);
-    state.step='time';
-    return updatePrompt(ctx,'Укажи время в формате ЧЧ:ММ, например 18:30. Часовой пояс: '+config.timeZone);
+    return beginPicker(ctx,state,'create',choice==='today'?today():shiftLocalDate(today(),1));
+  });
+  bot.callbackQuery(/^pick:(\d+):(m|d|h|n|back)(?::([0-9-]+))?$/,async ctx=>{
+    const state=flows.get(ctx.from.id);
+    const [,id,action,value]=ctx.match;
+    await ctx.answerCallbackQuery();
+    if(!state || state.pickerId!==id || state.messageId!==ctx.callbackQuery.message.message_id) return;
+    if(action==='m' && (state.step==='picker-date'||state.step==='picker-hour')) return calendar(ctx,state,value);
+    if(action==='d' && state.step==='picker-date') {
+      if(value.slice(0,7)!==state.pickerMonth || value<today()) return;
+      state.date=value;
+      return hours(ctx,state);
+    }
+    if(action==='h' && state.step==='picker-hour' && /^(?:[01]\d|2[0-3])$/.test(value||'')) {
+      state.hour=value;
+      return minutes(ctx,state);
+    }
+    if(action==='back' && state.step==='picker-minute') return hours(ctx,state);
+    if(action!=='n' || state.step!=='picker-minute' || !/^[0-5]\d$/.test(value||'')) return;
+    try {
+      const dueAt=localToIso(state.date,state.hour+':'+value,config.timeZone);
+      if(Date.parse(dueAt)<=Date.now()) throw new Error('Это время уже прошло. Выбери другое.');
+      if(state.pickerMode==='create') {
+        state.dueAt=dueAt;
+        state.step='recurrence';
+        return updatePrompt(ctx,'Повторять задачу?',{reply_markup:new InlineKeyboard().text('Без повтора','repeat:none').text('Раз в неделю','repeat:weekly')});
+      }
+      const current=store.get(state.taskId);
+      if(!current || current.status!=='active' || current.revision!==state.revision) {
+        await updatePrompt(ctx,'Задача уже изменилась. Открой её снова.');
+        flows.delete(ctx.from.id);
+        return;
+      }
+      const task=state.pickerMode==='edit'
+        ? store.edit(state.taskId,{revision:state.revision,dueAt})
+        : store.reschedule(state.taskId,dueAt,state.reason||'busy');
+      await updatePrompt(ctx,task?'Готово: «'+task.title+'» — '+whenLabel(task)+'.':'Задача уже изменилась.');
+      flows.delete(ctx.from.id);
+    } catch(error) {
+      await hours(ctx,state,error.message);
+    }
   });
   bot.callbackQuery(/^repeat:(none|weekly)$/,async ctx=>{
     const state=flows.get(ctx.from.id);
@@ -290,7 +381,7 @@ export function createBot(config, store, options) {
     const reason=state?.taskId===id?state.reason:'busy';
     if(choice==='custom'){
       flows.set(ctx.from.id,{step:'reschedule-custom',taskId:id,reason,revision:task.revision,messageId:ctx.callbackQuery.message.message_id});
-      return updatePrompt(ctx,'Напиши новую дату и время одним сообщением в формате 2026-11-24 18:30. Часовой пояс: '+config.timeZone);
+      return beginPicker(ctx,flows.get(ctx.from.id),'move');
     }
     let dueAt;
     if(choice==='tomorrow'){
