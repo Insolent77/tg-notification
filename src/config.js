@@ -17,7 +17,8 @@ export function readConfig(env = process.env) {
   const quietFrom=Number(env.QUIET_FROM_HOUR ?? 23);
   const quietUntil=Number(env.QUIET_UNTIL_HOUR ?? 8);
   if(![quietFrom,quietUntil].every(h=>Number.isInteger(h)&&h>=0&&h<=23))throw new Error('Quiet hours must be 0–23');
-  const publicUrl = (env.PUBLIC_URL || '').trim().replace(/\/$/, '');
+  const railwayUrl = env.RAILWAY_PUBLIC_DOMAIN?.trim() ? 'https://' + env.RAILWAY_PUBLIC_DOMAIN.trim() : '';
+  const publicUrl = (env.PUBLIC_URL?.trim() || railwayUrl).replace(/\/$/, '');
   if (publicUrl && !/^https:\/\//.test(publicUrl)) throw new Error('PUBLIC_URL must be HTTPS');
   const guest = Number(env.CONTRIBUTOR_TELEGRAM_ID || 0);
   if (!Number.isSafeInteger(guest) || guest < 0) throw new Error('Invalid CONTRIBUTOR_TELEGRAM_ID');

@@ -81,6 +81,11 @@ export function createBot(config, store, options) {
     return updatePrompt(ctx,'Выбери дату. Часовой пояс: '+config.timeZone,{reply_markup:keyboard});
   }
   async function hours(ctx,state,notice='') {
+    if(config.publicUrl) {
+      state.step='picker-hour';
+      const keyboard=webPicker(new InlineKeyboard(),state,state.pickerMode,state.date);
+      return updatePrompt(ctx,[notice,'Выбери время в календаре.'].filter(Boolean).join('\n'),{reply_markup:keyboard});
+    }
     state.step='picker-hour';
     const keyboard=new InlineKeyboard();
     for(let h=0;h<24;h++) {
@@ -271,7 +276,10 @@ export function createBot(config, store, options) {
       if (!text || text.length>200) return updatePrompt(ctx,'Название должно содержать от 1 до 200 символов.');
       state.title=text;
       state.step='date';
-      return updatePrompt(ctx,'Когда напомнить?',{reply_markup:webPicker(new InlineKeyboard(),state,'create').text('Сегодня','date:today').text('Завтра','date:tomorrow').row().text('Без напоминания','date:none').row().text('📅 Выбрать дату','date:custom')});
+      const keyboard=webPicker(new InlineKeyboard(),state,'create');
+      if(!config.publicUrl) keyboard.text('Сегодня','date:today').text('Завтра','date:tomorrow').row().text('📅 Выбрать дату','date:custom').row();
+      keyboard.text('Без напоминания','date:none');
+      return updatePrompt(ctx,'Когда напомнить?',{reply_markup:keyboard});
     }
     if (state.step==='custom-date') {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return updatePrompt(ctx,'Напиши дату в формате ГГГГ-ММ-ДД, например 2026-11-24.');
