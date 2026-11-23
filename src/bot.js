@@ -10,7 +10,7 @@ const safeText = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;'
 export function createBot(config, store, options) {
   const bot = new Bot(config.botToken,options);
   const flows = new Map();
-  const mutable=/^(?:start|progress|cant|done|confirmdone|reason|move|unschedule|snooze|delay):(\d+)(?::|$)/;
+  const mutable=/^(?:start|progress|cant|done|confirmdone|reason|move|unschedule|snooze|delay|delete|confirmdelete):(\d+)(?::|$)/;
   bot.api.config.use((prev,method,payload,signal)=>{
     for(const row of payload.reply_markup?.inline_keyboard || []) for(const button of row){
       const match=mutable.exec(button.callback_data||'');
@@ -42,7 +42,9 @@ export function createBot(config, store, options) {
       message += '• <b>'+safeText(t.title)+'</b> ['+priorityLabel(t.priority)+'] — '+safeText(t.category)+(when ? ' · '+localDate(when,config.timeZone)+' '+localTime(when,config.timeZone) : ' · без напоминания')+'\n';
     }
     if (tasks.length>30) message+='\nПоказаны первые 30 задач. Остальные — в Mini App.';
-    return ctx.reply(message, {parse_mode:'HTML'});
+    const keyboard = new InlineKeyboard();
+    for (const t of tasks.slice(0,30)) keyboard.text('🗑 '+t.title.slice(0,45), 'delete:'+t.id).row();
+    return ctx.reply(message, {parse_mode:'HTML', reply_markup:keyboard});
   };
   bot.use(async (ctx,next) => {
     if (ctx.chat?.type !== 'private') return;
@@ -62,6 +64,7 @@ export function createBot(config, store, options) {
           let task;
           try { task = store.createFromMessage(ctx.chat.id,ctx.message.message_id,input); }
           catch (error) { return ctx.reply(error.message); }
+          if (!task) return ctx.reply('Эта задача уже была удалена.');
           return ctx.reply('Записано: «'+task.title+'», '+whenLabel(task)+' ('+config.timeZone+').');
         }
         if (guest || ctx.message.voice) {
@@ -88,6 +91,17 @@ export function createBot(config, store, options) {
       ctx.callbackQuery.data=action;
     }
     await next();
+  });
+  bot.callbackQuery(/^delete:(\d+)$/,async ctx=>{
+    const task=store.get(ctx.match[1]);
+    await ctx.answerCallbackQuery();
+    await ctx.reply('Удалить задачу «'+task.title+'»?', {reply_markup:new InlineKeyboard().text('Удалить','confirmdelete:'+task.id).text('Отмена','noop')});
+  });
+  bot.callbackQuery(/^confirmdelete:(\d+)$/,async ctx=>{
+    const task=store.get(ctx.match[1]);
+    const deleted=store.delete(task.id);
+    await ctx.answerCallbackQuery();
+    await ctx.reply(deleted ? 'Задача «'+task.title+'» удалена.' : 'Задача уже удалена.');
   });
   bot.command('start',ctx=>ctx.reply('Привет! Я напомню о задачах и буду повторять уведомления до выполнения.\n\nВыбери действие ниже.', {reply_markup:menu()}));
   bot.command('id',ctx=>ctx.reply('Твой Telegram ID: '+ctx.from.id));

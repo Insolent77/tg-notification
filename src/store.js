@@ -79,6 +79,9 @@ export function openStore(path, ownerId) {
     }),
     get(id) { return getStatement.get(Number(id), ownerId) || null; },
     list() { return db.prepare('SELECT * FROM tasks WHERE owner_id=? ORDER BY status ASC, CASE WHEN due_at IS NULL THEN 1 ELSE 0 END, due_at ASC, created_at DESC').all(ownerId); },
+    delete(id) {
+      return db.prepare("DELETE FROM tasks WHERE id=? AND owner_id=? AND status='active'").run(Number(id),ownerId).changes > 0;
+    },
     done(id) {
       const result = updateDone.run(now(), Number(id), ownerId);
       if(result.changes)event(Number(id),'done');
