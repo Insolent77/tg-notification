@@ -5,7 +5,7 @@ import { createBot } from './bot.js';
 import { createServer } from './server.js';
 
 const config=readConfig();
-const store=openStore(config.databasePath,config.owner);
+const store=openStore(config.databasePath,config.owner,config.timeZone);
 const {bot,sendReminder,sendDaily}=createBot(config,store);
 const app=createServer(config,store);
 let running=false;
@@ -17,6 +17,7 @@ async function tick() {
   if(running)return;
   running=true;
   try {
+    store.advanceRecurring();
     const now=new Date();
     const hour=Number(localTime(now,config.timeZone).split(':')[0]);
     const day=localDate(now,config.timeZone);

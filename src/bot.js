@@ -10,7 +10,7 @@ const safeText = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;'
 export function createBot(config, store, options) {
   const bot = new Bot(config.botToken,options);
   const flows = new Map();
-  const mutable=/^(?:start|progress|cant|done|confirmdone|reason|move|unschedule|snooze|delay|delete|confirmdelete):(\d+)(?::|$)/;
+  const mutable=/^(?:start|progress|cant|done|confirmdone|reason|move|unschedule|snooze|delay|delete|confirmdelete|edit|editname|edittime):(\d+)(?::|$)/;
   bot.api.config.use((prev,method,payload,signal)=>{
     for(const row of payload.reply_markup?.inline_keyboard || []) for(const button of row){
       const match=mutable.exec(button.callback_data||'');
@@ -18,6 +18,22 @@ export function createBot(config, store, options) {
     }
     return prev(method,payload,signal);
   });
+  async function updatePrompt(ctx, text, options = {}) {
+    const state = flows.get(ctx.from.id);
+    const messageId = ctx.callbackQuery?.message?.message_id ?? state?.messageId;
+    if (state && messageId) state.messageId = messageId;
+    if (messageId) {
+      try {
+        return await ctx.api.editMessageText(ctx.chat.id, messageId, text, options);
+      } catch (error) {
+        if (String(error.description || error.message).includes('message is not modified')) return;
+        console.error('Could not update dialog message:', error.message);
+      }
+    }
+    const message = await ctx.reply(text, options);
+    if (state) state.messageId = message.message_id;
+    return message;
+  }
   const today = () => localDate(new Date(), config.timeZone);
   const menu = () => {
     const k = new Keyboard().text('➕ Создать задачку').text('📋 Мои задачи').row();
@@ -43,7 +59,7 @@ export function createBot(config, store, options) {
     }
     if (tasks.length>30) message+='\nПоказаны первые 30 задач. Остальные — в Mini App.';
     const keyboard = new InlineKeyboard();
-    for (const t of tasks.slice(0,30)) keyboard.text('🗑 '+t.title.slice(0,45), 'delete:'+t.id).row();
+    for (const t of tasks.slice(0,30)) keyboard.text('✏️ '+t.title.slice(0,35), 'edit:'+t.id).text('🗑', 'delete:'+t.id).row();
     return ctx.reply(message, {parse_mode:'HTML', reply_markup:keyboard});
   };
   bot.use(async (ctx,next) => {
@@ -92,16 +108,27 @@ export function createBot(config, store, options) {
     }
     await next();
   });
+  bot.callbackQuery(/^edit:(\d+)$/,async ctx=>{
+    const task=store.get(ctx.match[1]);
+    await ctx.answerCallbackQuery();
+    await updatePrompt(ctx,'Что изменить в задаче «'+task.title+'»?',{reply_markup:new InlineKeyboard().text('Название','editname:'+task.id).text('Дату и время','edittime:'+task.id)});
+  });
+  bot.callbackQuery(/^(editname|edittime):(\d+)$/,async ctx=>{
+    const task=store.get(ctx.match[2]);
+    flows.set(ctx.from.id,{step:ctx.match[1],taskId:task.id,revision:task.revision,messageId:ctx.callbackQuery.message.message_id});
+    await ctx.answerCallbackQuery();
+    await updatePrompt(ctx,ctx.match[1]==='editname'?'Напиши новое название задачи.':'Напиши новую дату и время в формате 2026-11-24 18:30. Часовой пояс: '+config.timeZone);
+  });
   bot.callbackQuery(/^delete:(\d+)$/,async ctx=>{
     const task=store.get(ctx.match[1]);
     await ctx.answerCallbackQuery();
-    await ctx.reply('Удалить задачу «'+task.title+'»?', {reply_markup:new InlineKeyboard().text('Удалить','confirmdelete:'+task.id).text('Отмена','noop')});
+    await updatePrompt(ctx,'Удалить задачу «'+task.title+'»?'+(task.series_id?' Еженедельный повтор тоже остановится.':''), {reply_markup:new InlineKeyboard().text('Удалить','confirmdelete:'+task.id).text('Отмена','noop')});
   });
   bot.callbackQuery(/^confirmdelete:(\d+)$/,async ctx=>{
     const task=store.get(ctx.match[1]);
     const deleted=store.delete(task.id);
     await ctx.answerCallbackQuery();
-    await ctx.reply(deleted ? 'Задача «'+task.title+'» удалена.' : 'Задача уже удалена.');
+    await updatePrompt(ctx,deleted ? 'Задача «'+task.title+'» удалена.' : 'Задача уже удалена.');
   });
   bot.command('start',ctx=>ctx.reply('Привет! Я напомню о задачах и буду повторять уведомления до выполнения.\n\nВыбери действие ниже.', {reply_markup:menu()}));
   bot.command('id',ctx=>ctx.reply('Твой Telegram ID: '+ctx.from.id));
@@ -111,7 +138,7 @@ export function createBot(config, store, options) {
   bot.command('cancel',ctx=>{flows.delete(ctx.from.id);return ctx.reply('Создание задачи отменено.',{reply_markup:menu()});});
   const start = async ctx => {
     flows.set(ctx.from.id,{step:'title'});
-    await ctx.reply('Как назовём задачу? Напиши название одним сообщением.\n/cancel — отмена');
+    await updatePrompt(ctx,'Как назовём задачу? Напиши название одним сообщением.\n/cancel — отмена');
   };
   bot.command('new',start);
   bot.hears('➕ Создать задачку',start);
@@ -122,43 +149,59 @@ export function createBot(config, store, options) {
     const state=flows.get(ctx.from.id);
     if (!state) {
       if(config.openaiApiKey){
-        try {const answer=await assistantReply(config,store,text);if(answer)await ctx.reply(answer.slice(0,4000));}
-        catch(e){console.error('Assistant response error:',e.message);await ctx.reply('Сейчас не могу ответить через ИИ. Но задачи и напоминания работают. Попробуй ещё раз позже.');}
-      } else await ctx.reply('Можешь открыть список дел или создать новую задачу. Для свободного диалога потребуется OPENAI_API_KEY.');
+        try {const answer=await assistantReply(config,store,text);if(answer)await updatePrompt(ctx,answer.slice(0,4000));}
+        catch(e){console.error('Assistant response error:',e.message);await updatePrompt(ctx,'Сейчас не могу ответить через ИИ. Но задачи и напоминания работают. Попробуй ещё раз позже.');}
+      } else await updatePrompt(ctx,'Можешь открыть список дел или создать новую задачу. Для свободного диалога потребуется OPENAI_API_KEY.');
+      return;
+    }
+    if(state.step==='editname' || state.step==='edittime') {
+      try {
+        let changes={revision:state.revision};
+        if(state.step==='editname') changes.title=text;
+        else {
+          const match=text.match(/^(\d{4}-\d{2}-\d{2})\s+([01]\d|2[0-3]):([0-5]\d)$/);
+          if(!match) throw new Error('Напиши дату и время в формате 2026-11-24 18:30.');
+          changes.dueAt=localToIso(match[1],match[2]+':'+match[3],config.timeZone);
+        }
+        const task=store.edit(state.taskId,changes);
+        await updatePrompt(ctx,task?'Задача обновлена: «'+task.title+'», '+whenLabel(task)+'.':'Задача уже изменилась. Открой список заново.');
+        flows.delete(ctx.from.id);
+      } catch(error) { await updatePrompt(ctx,error.message); }
       return;
     }
     if(state.step==='reschedule-custom') {
       const match=text.match(/^(\d{4}-\d{2}-\d{2})\s+([01]\d|2[0-3]):([0-5]\d)$/);
-      if(!match)return ctx.reply('Напиши дату и время одним сообщением: 2026-11-24 18:30');
+      if(!match)return updatePrompt(ctx,'Напиши дату и время одним сообщением: 2026-11-24 18:30');
       try{
         const dueAt=localToIso(match[1],match[2]+':'+match[3],config.timeZone);
-        if(store.get(state.taskId)?.revision!==state.revision){flows.delete(ctx.from.id);return ctx.reply('Задача уже изменилась. Открой её снова.');}
+        if(store.get(state.taskId)?.revision!==state.revision){flows.delete(ctx.from.id);return updatePrompt(ctx,'Задача уже изменилась. Открой её снова.');}
         const task=store.reschedule(state.taskId,dueAt,state.reason||'busy');
-        if(!task){flows.delete(ctx.from.id);return ctx.reply('Эта задача уже выполнена.');}
+        if(!task){flows.delete(ctx.from.id);return updatePrompt(ctx,'Эта задача уже выполнена.');}
+        await updatePrompt(ctx,'Договорились. Вернусь к «'+task.title+'» '+whenLabel(task)+'.');
         flows.delete(ctx.from.id);
-        return ctx.reply('Договорились. Вернусь к «'+task.title+'» '+whenLabel(task)+'.');
-      }catch(e){return ctx.reply(e.message);}
+        return;
+      }catch(e){return updatePrompt(ctx,e.message);}
     }
     if (state.step==='title') {
-      if (!text || text.length>200) return ctx.reply('Название должно содержать от 1 до 200 символов.');
+      if (!text || text.length>200) return updatePrompt(ctx,'Название должно содержать от 1 до 200 символов.');
       state.title=text;
       state.step='date';
-      return ctx.reply('Когда напомнить?',{reply_markup:new InlineKeyboard().text('Сегодня','date:today').text('Завтра','date:tomorrow').row().text('Без напоминания','date:none').row().text('Ввести дату вручную','date:custom')});
+      return updatePrompt(ctx,'Когда напомнить?',{reply_markup:new InlineKeyboard().text('Сегодня','date:today').text('Завтра','date:tomorrow').row().text('Без напоминания','date:none').row().text('Ввести дату вручную','date:custom')});
     }
     if (state.step==='custom-date') {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return ctx.reply('Напиши дату в формате ГГГГ-ММ-ДД, например 2026-11-24.');
-      state.date=text;state.step='time';return ctx.reply('Укажи время в формате ЧЧ:ММ, например 18:30. Часовой пояс: '+config.timeZone);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return updatePrompt(ctx,'Напиши дату в формате ГГГГ-ММ-ДД, например 2026-11-24.');
+      state.date=text;state.step='time';return updatePrompt(ctx,'Укажи время в формате ЧЧ:ММ, например 18:30. Часовой пояс: '+config.timeZone);
     }
     if (state.step==='time') {
       try { state.dueAt=localToIso(state.date,text,config.timeZone); if (Date.parse(state.dueAt)<=Date.now()) throw new Error('Время должно быть в будущем'); }
-      catch(e){return ctx.reply(e.message);}
-      state.step='category';
-      return ctx.reply('Выбери категорию:',{reply_markup:categoryButtons()});
+      catch(e){return updatePrompt(ctx,e.message);}
+      state.step='recurrence';
+      return updatePrompt(ctx,'Повторять задачу?',{reply_markup:new InlineKeyboard().text('Без повтора','repeat:none').text('Раз в неделю','repeat:weekly')});
     }
     if (state.step==='custom-category') {
-      if (!text || text.length>40) return ctx.reply('Категория должна содержать от 1 до 40 символов.');
+      if (!text || text.length>40) return updatePrompt(ctx,'Категория должна содержать от 1 до 40 символов.');
       state.category=text;
-      state.step='priority';return ctx.reply('Насколько это важно?',{reply_markup:priorityButtons()});
+      state.step='priority';return updatePrompt(ctx,'Насколько это важно?',{reply_markup:priorityButtons()});
     }
   });
   function categoryButtons() {
@@ -168,32 +211,40 @@ export function createBot(config, store, options) {
   }
   async function finish(ctx,state) {
     try {
-      const t=store.create({title:state.title,category:state.category||'Личное',dueAt:state.dueAt||null,priority:state.priority||'medium'});
+      const t=store.create({title:state.title,category:state.category||'Личное',dueAt:state.dueAt||null,priority:state.priority||'medium',recurrence:state.recurrence});
+      await updatePrompt(ctx,'✅ Задача создана: <b>'+safeText(t.title)+'</b>\nКатегория: '+safeText(t.category)+(t.due_at?'\nНапомню: '+localDate(new Date(t.due_at),config.timeZone)+' '+localTime(new Date(t.due_at),config.timeZone):'\nБез напоминания')+'\nПриоритет: '+priorityLabel(t.priority),{parse_mode:'HTML'});
       flows.delete(ctx.from.id);
-      await ctx.reply('✅ Задача создана: <b>'+safeText(t.title)+'</b>\nКатегория: '+safeText(t.category)+(t.due_at?'\nНапомню: '+localDate(new Date(t.due_at),config.timeZone)+' '+localTime(new Date(t.due_at),config.timeZone):'\nБез напоминания')+'\nПриоритет: '+priorityLabel(t.priority),{parse_mode:'HTML',reply_markup:menu()});
-    } catch(e) { await ctx.reply('Не удалось создать задачу: '+e.message); }
+    } catch(e) { await updatePrompt(ctx,'Не удалось создать задачу: '+e.message); }
   }
   bot.callbackQuery(/^date:(today|tomorrow|none|custom)$/,async ctx=>{
     const state=flows.get(ctx.from.id);
     await ctx.answerCallbackQuery();
     if (!state||state.step!=='date') return;
     const choice=ctx.match[1];
-    if (choice==='custom') {state.step='custom-date';return ctx.reply('Напиши дату в формате ГГГГ-ММ-ДД, например 2026-11-24.');}
-    if(choice==='none'){state.dueAt=null;state.step='category';return ctx.reply('Выбери категорию:',{reply_markup:categoryButtons()});}
+    if (choice==='custom') {state.step='custom-date';return updatePrompt(ctx,'Напиши дату в формате ГГГГ-ММ-ДД, например 2026-11-24.');}
+    if(choice==='none'){state.dueAt=null;state.step='category';return updatePrompt(ctx,'Выбери категорию:',{reply_markup:categoryButtons()});}
     state.date=choice==='today'?today():shiftLocalDate(today(),1);
     state.step='time';
-    return ctx.reply('Укажи время в формате ЧЧ:ММ, например 18:30. Часовой пояс: '+config.timeZone);
+    return updatePrompt(ctx,'Укажи время в формате ЧЧ:ММ, например 18:30. Часовой пояс: '+config.timeZone);
+  });
+  bot.callbackQuery(/^repeat:(none|weekly)$/,async ctx=>{
+    const state=flows.get(ctx.from.id);
+    await ctx.answerCallbackQuery();
+    if(!state||state.step!=='recurrence') return;
+    state.recurrence=ctx.match[1]==='weekly'?'weekly':null;
+    state.step='category';
+    await updatePrompt(ctx,'Выбери категорию:',{reply_markup:categoryButtons()});
   });
   bot.callbackQuery(/^cat:(\d+|other)$/,async ctx=>{
     const state=flows.get(ctx.from.id);
     await ctx.answerCallbackQuery();
     if (!state||state.step!=='category') return;
-    if(ctx.match[1]==='other'){state.step='custom-category';return ctx.reply('Напиши название категории (до 40 символов).');}
+    if(ctx.match[1]==='other'){state.step='custom-category';return updatePrompt(ctx,'Напиши название категории (до 40 символов).');}
     const category=categories[Number(ctx.match[1])];
     if(!category)return;
     state.category=category;
     state.step='priority';
-    await ctx.reply('Насколько это важно?',{reply_markup:priorityButtons()});
+    await updatePrompt(ctx,'Насколько это важно?',{reply_markup:priorityButtons()});
   });
   bot.callbackQuery(/^priority:(high|medium|low)$/,async ctx=>{
     const state=flows.get(ctx.from.id);
@@ -205,18 +256,18 @@ export function createBot(config, store, options) {
   bot.callbackQuery(/^start:(\d+)$/,async ctx=>{
     const task=store.started(Number(ctx.match[1]));
     await ctx.answerCallbackQuery({text:task?'Отлично, начнём':'Задача уже завершена'});
-    if(task)await ctx.reply('Начни с одного конкретного шага по «'+task.title+'». Я спрошу, как дела, через 20 минут.',{reply_markup:actions(task)});
+    if(task)await updatePrompt(ctx,'Начни с одного конкретного шага по «'+task.title+'». Я спрошу, как дела, через 20 минут.',{reply_markup:actions(task)});
   });
   bot.callbackQuery(/^progress:(\d+)$/,async ctx=>{
     const task=store.progress(Number(ctx.match[1]));
     await ctx.answerCallbackQuery({text:task?'Прогресс записан':'Задача уже завершена'});
-    if(task)await ctx.reply('Здорово, по «'+task.title+'» есть движение. До завершения ещё не дошли — вернусь через полчаса.',{reply_markup:actions(task)});
+    if(task)await updatePrompt(ctx,'Здорово, по «'+task.title+'» есть движение. До завершения ещё не дошли — вернусь через полчаса.',{reply_markup:actions(task)});
   });
   bot.callbackQuery(/^cant:(\d+)$/,async ctx=>{
     const task=store.get(Number(ctx.match[1]));
     await ctx.answerCallbackQuery();
-    if(!task||task.status!=='active')return ctx.reply('Эта задача уже завершена.');
-    await ctx.reply('Понял. Что сейчас мешает? Подберём нормальное время, а не будем переносить вслепую.',{
+    if(!task||task.status!=='active')return updatePrompt(ctx,'Эта задача уже завершена.');
+    await updatePrompt(ctx,'Понял. Что сейчас мешает? Подберём нормальное время, а не будем переносить вслепую.',{
       reply_markup:new InlineKeyboard().text('Занят другим','reason:'+task.id+':busy').text('Нет сил','reason:'+task.id+':tired').row()
         .text('Не знаю, с чего начать','reason:'+task.id+':stuck').row().text('Не хочу сейчас','reason:'+task.id+':avoid')
     });
@@ -226,20 +277,20 @@ export function createBot(config, store, options) {
     const id=Number(ctx.match[1]),reason=ctx.match[2];
     const task=store.noteBlocker(id,reason);
     await ctx.answerCallbackQuery();
-    if(!task)return ctx.reply('Эта задача уже завершена.');
-    flows.set(ctx.from.id,{step:'await-reschedule',taskId:id,reason});
-    await ctx.reply(reasonText[reason]+' Когда вернуться к задаче?',{reply_markup:postButtons(id)});
+    if(!task)return updatePrompt(ctx,'Эта задача уже завершена.');
+    flows.set(ctx.from.id,{step:'await-reschedule',taskId:id,reason,messageId:ctx.callbackQuery.message.message_id});
+    await updatePrompt(ctx,reasonText[reason]+' Когда вернуться к задаче?',{reply_markup:postButtons(id)});
   });
   bot.callbackQuery(/^move:(\d+):(10|30|60|tomorrow|custom)$/,async ctx=>{
     const id=Number(ctx.match[1]),choice=ctx.match[2];
     const task=store.get(id);
     await ctx.answerCallbackQuery();
-    if(!task||task.status!=='active')return ctx.reply('Эта задача уже завершена.');
+    if(!task||task.status!=='active')return updatePrompt(ctx,'Эта задача уже завершена.');
     const state=flows.get(ctx.from.id);
     const reason=state?.taskId===id?state.reason:'busy';
     if(choice==='custom'){
-      flows.set(ctx.from.id,{step:'reschedule-custom',taskId:id,reason,revision:task.revision});
-      return ctx.reply('Напиши новую дату и время одним сообщением в формате 2026-11-24 18:30. Часовой пояс: '+config.timeZone);
+      flows.set(ctx.from.id,{step:'reschedule-custom',taskId:id,reason,revision:task.revision,messageId:ctx.callbackQuery.message.message_id});
+      return updatePrompt(ctx,'Напиши новую дату и время одним сообщением в формате 2026-11-24 18:30. Часовой пояс: '+config.timeZone);
     }
     let dueAt;
     if(choice==='tomorrow'){
@@ -249,17 +300,17 @@ export function createBot(config, store, options) {
     try{
       const moved=store.reschedule(id,dueAt,reason);
       if(state?.taskId===id)flows.delete(ctx.from.id);
-      if(!moved)return ctx.reply('Эта задача уже завершена.');
+      if(!moved)return updatePrompt(ctx,'Эта задача уже завершена.');
       const hint=behavioralHint(moved,store.recentEvents(40));
-      await ctx.reply('Хорошо, «'+moved.title+'» теперь на '+whenLabel(moved)+'.'+(hint?'\n\n'+hint:''));
-    }catch(e){await ctx.reply(e.message);}
+      await updatePrompt(ctx,'Хорошо, «'+moved.title+'» теперь на '+whenLabel(moved)+'.'+(hint?'\n\n'+hint:''));
+    }catch(e){await updatePrompt(ctx,e.message);}
   });
   bot.callbackQuery(/^done:(\d+)$/,async ctx=>{
     const id=Number(ctx.match[1]);
     const current=store.get(id);
     if(current?.status==='active' && current.priority==='high' && current.progress_count===0){
       await ctx.answerCallbackQuery();
-      return ctx.reply('Это важное дело. Уже полностью готово или пока есть продвижение?',{
+      return updatePrompt(ctx,'Это важное дело. Уже полностью готово или пока есть продвижение?',{
         reply_markup:new InlineKeyboard().text('✅ Готово целиком','confirmdone:'+id).text('📈 Есть прогресс','progress:'+id)
       });
     }
@@ -276,7 +327,7 @@ export function createBot(config, store, options) {
     const id=Number(ctx.match[1]);
     if(!store.get(id)||store.get(id).status!=='active')return ctx.answerCallbackQuery({text:'Задача уже завершена'});
     await ctx.answerCallbackQuery();
-    await ctx.reply('Окей, когда вернуться к этой задаче?',{reply_markup:postButtons(id)});
+    await updatePrompt(ctx,'Окей, когда вернуться к этой задаче?',{reply_markup:postButtons(id)});
   });
   bot.callbackQuery(/^delay:(\d+):(10|30|60)$/,async ctx=>{
     const task=store.snooze(Number(ctx.match[1]),Number(ctx.match[2]));

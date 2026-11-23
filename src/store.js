@@ -1,13 +1,19 @@
 import Database from 'better-sqlite3';
+import {localDate, localTime, localToIso, shiftLocalDate} from './dates.js';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-export function openStore(path, ownerId) {
+export function openStore(path, ownerId, timeZone = 'Europe/Moscow') {
   mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');
   db.exec(`
+    CREATE TABLE IF NOT EXISTS recurring_tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER NOT NULL,
+      title TEXT NOT NULL, category TEXT NOT NULL, priority TEXT NOT NULL,
+      next_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS message_tasks (chat INTEGER, message INTEGER, task_id INTEGER NOT NULL, PRIMARY KEY(chat,message));
     CREATE TABLE IF NOT EXISTS tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,6 +50,7 @@ export function openStore(path, ownerId) {
   if(!columns.includes('reminder_count')) db.exec("ALTER TABLE tasks ADD COLUMN reminder_count INTEGER NOT NULL DEFAULT 0");
   if(!columns.includes('revision')) db.exec('ALTER TABLE tasks ADD COLUMN revision INTEGER NOT NULL DEFAULT 0');
   if(!columns.includes('followup')) db.exec("ALTER TABLE tasks ADD COLUMN followup TEXT NOT NULL DEFAULT 'due'");
+  if(!columns.includes('series_id')) db.exec('ALTER TABLE tasks ADD COLUMN series_id INTEGER');
   const now = () => new Date().toISOString();
   const event=(id,action,reason=null)=>db.prepare('INSERT INTO task_events(task_id,action,reason,created_at) VALUES (?,?,?,?)').run(id,action,reason,now());
   const getStatement = db.prepare('SELECT * FROM tasks WHERE id = ? AND owner_id = ?');
@@ -52,8 +59,38 @@ export function openStore(path, ownerId) {
   const updateSchedule = db.prepare("UPDATE tasks SET revision=revision+1,followup='due',due_at=?, next_notify_at=?,reminder_count=0 WHERE id=? AND owner_id=? AND status='active'");
   const selectDue = db.prepare("SELECT * FROM tasks WHERE owner_id=? AND status='active' AND next_notify_at IS NOT NULL AND next_notify_at<=? AND (?=0 OR (reminder_count=0 AND followup='due')) ORDER BY next_notify_at LIMIT 25");
   const claim = db.prepare("UPDATE tasks SET next_notify_at=? WHERE id=? AND owner_id=? AND status='active' AND next_notify_at=?");
+  function nextWeek(iso) {
+    const date = new Date(iso);
+    return localToIso(shiftLocalDate(localDate(date,timeZone),7),localTime(date,timeZone),timeZone);
+  }
   const store = {
-    create({ title, category='Личное', dueAt=null, priority='medium' }) {
+    advanceRecurring: db.transaction(() => {
+      const rows=db.prepare('SELECT * FROM recurring_tasks WHERE owner_id=? AND next_at<=?').all(ownerId,now());
+      for(const series of rows) {
+        const due=series.next_at;
+        const result=insert.run(ownerId,series.title,series.category,due,due,now(),series.priority);
+        db.prepare('UPDATE tasks SET series_id=? WHERE id=?').run(series.id,result.lastInsertRowid);
+        let next=nextWeek(due);
+        while(next<=now()) next=nextWeek(next);
+        db.prepare('UPDATE recurring_tasks SET next_at=? WHERE id=? AND owner_id=?').run(next,series.id,ownerId);
+      }
+    }),
+    edit(id, changes) {
+      const task=store.get(id);
+      if(!task || task.status!=='active' || task.revision!==changes.revision) return null;
+      const title=changes.title===undefined ? task.title : String(changes.title).trim();
+      if(!title || title.length>200) throw new Error('Название задачи должно содержать 1–200 символов');
+      const due=changes.dueAt===undefined ? task.due_at : changes.dueAt;
+      if(changes.dueAt!==undefined && due && (!Number.isFinite(Date.parse(due)) || Date.parse(due)<=Date.now())) throw new Error('Время должно быть в будущем');
+      return db.transaction(()=>{
+        db.prepare('UPDATE tasks SET title=?,due_at=?,next_notify_at=CASE WHEN ? THEN ? ELSE next_notify_at END,revision=revision+1 WHERE id=? AND owner_id=?').run(title,due,Number(changes.dueAt!==undefined),due,id,ownerId);
+        if(task.series_id) {
+          db.prepare('UPDATE recurring_tasks SET title=?,next_at=CASE WHEN ? THEN ? ELSE next_at END WHERE id=? AND owner_id=?').run(title,Number(changes.dueAt!==undefined),changes.dueAt ? nextWeek(changes.dueAt) : null,task.series_id,ownerId);
+        }
+        return store.get(id);
+      })();
+    },
+    create({ title, category='Личное', dueAt=null, priority='medium', recurrence=null }) {
       const cleanTitle = String(title || '').trim();
       const cleanCategory = String(category || 'Личное').trim();
       if (!cleanTitle || cleanTitle.length > 200) throw new Error('Название задачи должно содержать 1–200 символов');
@@ -67,8 +104,17 @@ export function openStore(path, ownerId) {
         if (timestamp <= Date.now()) throw new Error('Напоминание должно быть в будущем');
         iso = new Date(timestamp).toISOString();
       }
-      const result = insert.run(ownerId, cleanTitle, cleanCategory, iso, iso, now(), priority);
-      return store.get(Number(result.lastInsertRowid));
+      if (recurrence && (recurrence !== 'weekly' || !iso)) throw new Error('Для еженедельного повтора укажите дату и время');
+      return db.transaction(() => {
+        const result = insert.run(ownerId, cleanTitle, cleanCategory, iso, iso, now(), priority);
+        const id = Number(result.lastInsertRowid);
+        if (recurrence === 'weekly') {
+          const next = nextWeek(iso);
+          const series = db.prepare('INSERT INTO recurring_tasks(owner_id,title,category,priority,next_at) VALUES(?,?,?,?,?)').run(ownerId,cleanTitle,cleanCategory,priority,next);
+          db.prepare('UPDATE tasks SET series_id=? WHERE id=?').run(series.lastInsertRowid,id);
+        }
+        return store.get(id);
+      })();
     },
     createFromMessage: db.transaction((chat,message,input)=>{
       const existing=db.prepare('SELECT task_id FROM message_tasks WHERE chat=? AND message=?').get(chat,message);
@@ -80,7 +126,12 @@ export function openStore(path, ownerId) {
     get(id) { return getStatement.get(Number(id), ownerId) || null; },
     list() { return db.prepare('SELECT * FROM tasks WHERE owner_id=? ORDER BY status ASC, CASE WHEN due_at IS NULL THEN 1 ELSE 0 END, due_at ASC, created_at DESC').all(ownerId); },
     delete(id) {
-      return db.prepare("DELETE FROM tasks WHERE id=? AND owner_id=? AND status='active'").run(Number(id),ownerId).changes > 0;
+      return db.transaction(()=>{
+        const task=store.get(id);
+        if(!task || task.status!=='active') return false;
+        if(task.series_id) db.prepare('DELETE FROM recurring_tasks WHERE id=? AND owner_id=?').run(task.series_id,ownerId);
+        return db.prepare("DELETE FROM tasks WHERE id=? AND owner_id=? AND status='active'").run(Number(id),ownerId).changes > 0;
+      })();
     },
     done(id) {
       const result = updateDone.run(now(), Number(id), ownerId);
