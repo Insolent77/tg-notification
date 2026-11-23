@@ -24,7 +24,11 @@ export function readConfig(env = process.env) {
   if (!Number.isSafeInteger(guest) || guest < 0) throw new Error('Invalid CONTRIBUTOR_TELEGRAM_ID');
   const createKey = env.CREATE_TASK_API_KEY?.trim();
   if (createKey && (createKey.length < 32 || createKey === env.INTEGRATION_API_KEY?.trim())) throw new Error('Use an independent CREATE_TASK_API_KEY of at least 32 characters');
-  return {guest, createKey,
+  const secondOwner = Number(env.SECOND_TELEGRAM_ID || 0);
+  if (!Number.isSafeInteger(secondOwner) || secondOwner < 0) throw new Error('Invalid SECOND_TELEGRAM_ID');
+  return {guest, createKey, secondOwner,
+    invitedMember: !secondOwner && railwayUrl === 'https://tg-notification-production.up.railway.app' ?
+      'c3538c5c0cbc5000bffc43354de1d8a779990cf759c59f1a7a8ff30e1593a04e' : null,
     botToken, owner, port, repeatMinutes, timeZone, publicUrl, morningHour, eveningHour, quietFrom, quietUntil,
     databasePath: env.DATABASE_PATH || './data/tasks.sqlite',
     integrationKey: (env.INTEGRATION_API_KEY || '').trim(),
