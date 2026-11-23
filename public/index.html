@@ -17,6 +17,10 @@
     <header><h1>Мои задачи</h1></header>
     <button id="add-button" class="add-button" disabled>＋ Создать задачу</button>
     <section id="task-list" class="task-list" aria-live="polite"></section>
+    <details id="completed-tasks" open hidden>
+      <summary>Завершённые <span id="completed-count"></span></summary>
+      <div id="completed-list" class="task-list"></div>
+    </details>
     <p id="error" class="error" role="alert" hidden></p>
   </main>
   <dialog id="task-dialog">

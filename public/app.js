@@ -70,9 +70,15 @@ function render() {
   if(!tasks.length){
     const empty=make('div','empty');
     empty.append(make('strong','','Пока нет активных задач'),make('span','','Нажми «Создать задачу», чтобы добавить дело.'));
-    root.append(empty);return;
+    root.append(empty);
   }
-  for(const task of tasks){
+  const completed=state.tasks.filter(task=>task.status==='done')
+    .sort((a,b)=>(b.completed_at || '').localeCompare(a.completed_at || ''));
+  $('completed-tasks').hidden=completed.length===0;
+  $('completed-count').textContent=String(completed.length);
+  const completedList=$('completed-list');
+  completedList.replaceChildren();
+  for(const task of [...tasks,...completed]){
     const done=task.status==='done';
     const item=make('article','task'+(done?' done':''));
     const check=make('button','check-task',done?'✓':'');
@@ -110,7 +116,7 @@ function render() {
       details.append(make('summary','','Действия'),controls);
       content.append(details);
     }
-    root.append(item);
+    (done ? completedList : root).append(item);
   }
 }
 async function refresh(){
