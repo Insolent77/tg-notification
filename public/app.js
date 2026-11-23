@@ -9,7 +9,7 @@ const inputValue=date=>dateKey(date)+'T'+localTime(date,state.zone);
 const fromInput=value=>localToIso(...value.split('T'),state.zone);
 function showError(message,id='error'){const el=$(id);el.hidden=!message;el.textContent=message||'';}
 async function request(path,options={}) {
-  if(!tg?.initData)throw new Error('Открой приложение через кнопку в Telegram.');
+  if(!tg?.initData)throw new Error('Закрой это окно, отправь боту /start и нажми «📋 Мои задачи» под новым сообщением.');
   const response=await fetch(path,{
     ...options,
     headers:{'Content-Type':'application/json','X-Telegram-Init-Data':tg.initData,...options.headers}
