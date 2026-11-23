@@ -1,0 +1,16 @@
+* { box-sizing: border-box }
+body { margin: 0; padding: 16px; background: var(--tg-theme-bg-color,#27272a); color: var(--tg-theme-text-color,#fff); font: 16px system-ui,sans-serif }
+main { max-width: 310px; margin: auto }
+.flatpickr-calendar.inline { background: transparent; box-shadow: none; max-width: 100% }
+.flatpickr-months .flatpickr-month,.flatpickr-current-month .flatpickr-monthDropdown-months,.flatpickr-day,span.flatpickr-weekday { color: inherit }
+.flatpickr-current-month select option { color: #202124 }
+.flatpickr-months svg { fill: var(--tg-theme-text-color,#fff) }
+.flatpickr-day.flatpickr-disabled,.flatpickr-day.prevMonthDay,.flatpickr-day.nextMonthDay { color: var(--tg-theme-hint-color,#909097) }
+.flatpickr-day:hover { color: #222 }
+.time,footer { display: flex; gap: 8px; margin: 14px 0 8px }
+label,button { flex: 1; min-width: 0 }
+label,small { font-size: 13px }
+input[type=number],button { width:100%; padding:9px; color:inherit; background:var(--tg-theme-secondary-bg-color,#333337); border:0; border-radius:7px; font:inherit }
+input[type=number] { text-align:center; margin-top:4px; font-size:18px }
+#save { background:var(--tg-theme-button-color,#298bba); color:var(--tg-theme-button-text-color,#fff) }
+#status:empty { display:none }

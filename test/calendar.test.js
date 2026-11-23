@@ -73,3 +73,38 @@ test('typed time creates a task after date selection',async()=>{
     assert.ok(calls.some(x=>x.method==='editMessageText'));
   } finally {store.close();}
 });
+
+test('Mini App saves midnight to the original prompt and rejects duplicate submissions',async()=>{
+  const store=openStore(':memory:',123);
+  const calls=[];
+  const client={fetch:async(url,init)=>{
+    const method=String(url).split('/').at(-1);
+    const payload=JSON.parse(init.body);
+    calls.push({method,payload});
+    return Response.json({ok:true,result:method==='sendMessage'?{message_id:42,chat:{id:123,type:'private'},date:1,text:payload.text}:true});
+  }};
+  const {bot,savePicker}=createBot({publicUrl:'https://example.com',owner:123,timeZone:'Europe/Moscow',botToken:'1:test'},store,{client});
+  bot.botInfo={id:1,is_bot:true,first_name:'Test',username:'test_bot'};
+  const from={id:123,is_bot:false,first_name:'Test'};
+  const msg=(text,id=1)=>({message_id:id,date:1,chat:{id:123,type:'private'},from,text});
+  const message=async(text,id)=>bot.handleUpdate({update_id:id,message:msg(text,id)});
+  const button=async(data,id)=>bot.handleUpdate({update_id:id,callback_query:{id:String(id),from,message:msg('prompt',42),chat_instance:'1',data}});
+  try {
+    await message('➕ Создать задачку',1);
+    await message('Календарь',2);
+    const link = calls.at(-1).payload.reply_markup.inline_keyboard.flat().find(button=>button.web_app).web_app.url;
+    const selection={session:new URL(link).searchParams.get('session'),date:'2099-11-24',time:'00:00'};
+    await savePicker(selection);
+    assert.equal(calls.at(-1).method,'editMessageText');
+    assert.equal(calls.at(-1).payload.message_id,42);
+    assert.match(calls.at(-1).payload.text,/00:00/);
+    await assert.rejects(savePicker(selection));
+    await button('repeat:none',7);
+    await button('cat:0',8);
+    await button('priority:medium',9);
+    const task=store.list()[0];
+    assert.equal(task.title,'Календарь');
+    assert.equal(task.due_at,'2099-11-23T21:00:00.000Z');
+    assert.ok(calls.some(x=>x.method==='editMessageText'));
+  } finally {store.close();}
+});

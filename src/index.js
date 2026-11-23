@@ -6,8 +6,8 @@ import { createServer } from './server.js';
 
 const config=readConfig();
 const store=openStore(config.databasePath,config.owner,config.timeZone);
-const {bot,sendReminder,sendDaily}=createBot(config,store);
-const app=createServer(config,store);
+const {bot,sendReminder,sendDaily,savePicker}=createBot(config,store);
+const app=createServer(config,store,savePicker);
 let running=false;
 const isQuiet=hour=>config.quietFrom===config.quietUntil?false:config.quietFrom<config.quietUntil
   ?hour>=config.quietFrom&&hour<config.quietUntil

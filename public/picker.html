@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ru"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дата и время</title>
+<link rel="stylesheet" href="/flatpickr/flatpickr.min.css">
+<link rel="stylesheet" href="/picker.css">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script defer src="/flatpickr/flatpickr.min.js"></script>
+<script defer src="/flatpickr/l10n/ru.js"></script>
+<script defer src="/picker.js"></script>
+</head><body><main><form id="picker">
+<input id="day" aria-label="Дата" hidden>
+<div class="time">
+<label>Часы<input id="hour" type="number" min="0" max="23" step="1" inputmode="numeric" required></label>
+<label>Минуты<input id="minute" type="number" min="0" max="59" step="1" inputmode="numeric" required></label>
+</div>
+<small id="zone"></small><p role="status" id="status"></p>
+<footer><button id="cancel" type="button">Отмена</button><button id="save">Сохранить</button></footer>
+</form></main></body></html>

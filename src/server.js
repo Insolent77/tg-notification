@@ -21,7 +21,7 @@ export function verifyTelegramInitData(initData, botToken, owner) {
 function withErrors(fn) {
   return (req,res,next)=>Promise.resolve().then(()=>fn(req,res)).catch(next);
 }
-export function createServer(config,store) {
+export function createServer(config,store,savePicker) {
   const app=express();
   app.disable('x-powered-by');
   app.use(express.json({limit:'16kb'}));
@@ -31,6 +31,12 @@ export function createServer(config,store) {
     if(!verifyTelegramInitData(req.get('X-Telegram-Init-Data'),config.botToken,config.owner)) return res.status(401).json({error:'Unauthorized'});
     next();
   };
+  app.use('/flatpickr',express.static(join(process.cwd(),'node_modules','flatpickr','dist')));
+  app.post('/api/picker',tgAuth,withErrors(async(req,res)=>{
+    try { await savePicker(req.body); }
+    catch(error) { return res.status(400).json({error:error.message}); }
+    res.json({ok:true});
+  }));
   const integrationAuth=(...keys)=>(req,res,next)=>{
     const enabled=keys.filter(key=>key && key.length>=24);
     if(!enabled.length)return res.status(503).json({error:'Integration disabled'});

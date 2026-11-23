@@ -15,6 +15,7 @@
     "better-sqlite3": "^12.4.1",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "flatpickr": "4.6.13",
     "grammy": "^1.38.3"
   }
 }

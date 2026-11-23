@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import {parseRequest, transcribe} from './intake.js';
 import {assistantReply} from './assistant.js';
 import { Bot, InlineKeyboard, Keyboard } from 'grammy';
@@ -33,6 +34,27 @@ export function createBot(config, store, options) {
     const message = await ctx.reply(text, options);
     if (state) state.messageId = message.message_id;
     return message;
+  }
+  function webPicker(keyboard,state,mode,date) {
+    if (!config.publicUrl) return keyboard;
+    const url=new URL('/picker.html',config.publicUrl);
+    state.webToken=randomUUID();
+    state.pickerMode=mode;
+    url.searchParams.set('session',state.webToken);
+    url.searchParams.set('zone',config.timeZone);
+    if (date) url.searchParams.set('date',date);
+    return keyboard.webApp('📅 Дата и время',url.href).row();
+  }
+  async function savePicker({session,date,time}) {
+    const state=flows.get(config.owner);
+    if (!session || session!==state?.webToken) throw new Error('Открой календарь заново в диалоге с ботом.');
+    const dueAt=localToIso(date,time,config.timeZone);
+    if(Date.parse(dueAt)<=Date.now()) throw new Error('Выбери будущее время.');
+    const context={from:{id:config.owner},chat:{id:config.owner},api:bot.api,
+      reply:(text,options)=>bot.api.sendMessage(config.owner,text,options)};
+    state.webToken=null;
+    state.date=date;
+    await applyPickedTime(context,state,time,true);
   }
   let pickerSequence = 0;
   async function calendar(ctx, state, month) {
@@ -83,6 +105,12 @@ export function createBot(config, store, options) {
   async function beginPicker(ctx,state,mode,date) {
     state.pickerId=String(++pickerSequence);
     state.pickerMode=mode;
+    if(config.publicUrl) {
+      const keyboard=webPicker(new InlineKeyboard(),state,mode,date);
+      state.step='picker-hour';
+      state.date=date || today();
+      return updatePrompt(ctx,'Выбери дату и время напоминания.',{reply_markup:keyboard});
+    }
     if(date) {state.date=date; return hours(ctx,state);}
     return calendar(ctx,state,today().slice(0,7));
   }
@@ -243,7 +271,7 @@ export function createBot(config, store, options) {
       if (!text || text.length>200) return updatePrompt(ctx,'Название должно содержать от 1 до 200 символов.');
       state.title=text;
       state.step='date';
-      return updatePrompt(ctx,'Когда напомнить?',{reply_markup:new InlineKeyboard().text('Сегодня','date:today').text('Завтра','date:tomorrow').row().text('Без напоминания','date:none').row().text('📅 Выбрать дату','date:custom')});
+      return updatePrompt(ctx,'Когда напомнить?',{reply_markup:webPicker(new InlineKeyboard(),state,'create').text('Сегодня','date:today').text('Завтра','date:tomorrow').row().text('Без напоминания','date:none').row().text('📅 Выбрать дату','date:custom')});
     }
     if (state.step==='custom-date') {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return updatePrompt(ctx,'Напиши дату в формате ГГГГ-ММ-ДД, например 2026-11-24.');
@@ -279,20 +307,22 @@ export function createBot(config, store, options) {
     if (!state||state.step!=='date') return;
     const choice=ctx.match[1];
     if (choice==='custom') return beginPicker(ctx,state,'create');
-    if(choice==='none'){state.dueAt=null;state.step='category';return updatePrompt(ctx,'Выбери категорию:',{reply_markup:categoryButtons()});}
+    if(choice==='none'){state.webToken=null;state.dueAt=null;state.step='category';return updatePrompt(ctx,'Выбери категорию:',{reply_markup:categoryButtons()});}
     return beginPicker(ctx,state,'create',choice==='today'?today():shiftLocalDate(today(),1));
   });
-  async function applyPickedTime(ctx,state,timeText) {
+  async function applyPickedTime(ctx,state,timeText,fromWeb=false) {
     try {
       const dueAt=localToIso(state.date,timeText,config.timeZone);
       if(Date.parse(dueAt)<=Date.now()) throw new Error('Это время уже прошло. Выбери другое.');
+      state.webToken=null;
       if(state.pickerMode==='create') {
         state.dueAt=dueAt;
         state.step='recurrence';
-        return updatePrompt(ctx,'Повторять задачу?',{reply_markup:new InlineKeyboard().text('Без повтора','repeat:none').text('Раз в неделю','repeat:weekly')});
+        return updatePrompt(ctx,state.date+' · '+timeText+'\nПовторять задачу?',{reply_markup:new InlineKeyboard().text('Без повтора','repeat:none').text('Раз в неделю','repeat:weekly')});
       }
       const current=store.get(state.taskId);
       if(!current || current.status!=='active' || current.revision!==state.revision) {
+        if(fromWeb) throw new Error('Задача уже изменилась. Открой её снова.');
         await updatePrompt(ctx,'Задача уже изменилась. Открой её снова.');
         flows.delete(ctx.from.id);
         return;
@@ -303,6 +333,7 @@ export function createBot(config, store, options) {
       await updatePrompt(ctx,task?'Готово: «'+task.title+'» — '+whenLabel(task)+'.':'Задача уже изменилась.');
       flows.delete(ctx.from.id);
     } catch(error) {
+      if(fromWeb) throw error;
       await hours(ctx,state,error.message);
     }
   }
@@ -469,5 +500,5 @@ export function createBot(config, store, options) {
     await ctx.reply('Какую задачу перенести на завтра, 09:00? Можно выбрать по одной.',{reply_markup:keyboard});
   });
   bot.callbackQuery('list:open',async ctx=>{await ctx.answerCallbackQuery();await showTasks(ctx);});
-  return {bot,sendReminder,sendDaily};
+  return {bot,sendReminder,sendDaily,savePicker};
 }
