@@ -120,7 +120,7 @@ function render() {
   }
 }
 async function refresh(){
-  try{const data=await request('/api/tasks');state.zone=data.timeZone;$('zone').textContent='('+state.zone+')';$('add-button').disabled=false;state.tasks=data.tasks;showError('');render();}
+  try{const data=await request('/api/tasks');state.zone=data.timeZone;$('zone').textContent='Часовой пояс · '+state.zone;$('add-button').disabled=false;state.tasks=data.tasks;showError('');render();}
   catch(e){showError(e.message);}
 }
 const dialog=$('task-dialog');
@@ -132,7 +132,7 @@ $('add-button').onclick=()=>{
   $('time').disabled=false;
   $('day').value=dateKey(initial);
   $('time').value=localTime(initial,state.zone);
-  if(window.flatpickr) flatpickr($('day'),{locale:'ru',disableMobile:true,inline:true,minDate:dateKey(new Date()),defaultDate:dateKey(initial),dateFormat:'Y-m-d'});
+  $('day').min=dateKey(new Date());
   showError('','form-error');
   dialog.showModal();
 };

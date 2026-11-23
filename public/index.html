@@ -3,13 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#101521" />
+  <meta name="theme-color" content="#101816" />
   <title>Мои дела — TG Notification</title>
   <link rel="stylesheet" href="/style.css" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="/flatpickr/themes/dark.css">
-  <script defer src="/flatpickr/flatpickr.min.js"></script>
-  <script defer src="/flatpickr/l10n/ru.js"></script>
   <script type="module" src="/app.js" defer></script>
 </head>
 <body>
@@ -23,23 +20,24 @@
     </details>
     <p id="error" class="error" role="alert" hidden></p>
   </main>
-  <dialog id="task-dialog">
+  <dialog id="task-dialog" aria-labelledby="create-heading">
     <form id="task-form">
-      <div class="dialog-head"><h2>Новая задача</h2><button type="button" id="close-dialog" class="close" aria-label="Закрыть">×</button></div>
+      <div class="dialog-head"><h2 id="create-heading">Новая задача</h2><button type="button" id="close-dialog" class="close" aria-label="Закрыть">×</button></div>
       <label for="title">Название</label><input id="title" name="title" required maxlength="200" placeholder="Что нужно сделать?" />
-      <label class="check-label"><input id="remind" type="checkbox" checked /> Напомнить в указанное время</label>
+      <label class="check-label"><input id="remind" type="checkbox" checked /> Напоминание</label>
       <div id="schedule">
-        <label for="day">Дата</label><input type="date" id="day" required>
-        <label for="time">Время <span id="zone"></span></label><input type="time" id="time" required>
+        <div class="date-time"><div><label for="day">Дата</label><input type="date" id="day" required></div>
+        <div><label for="time">Время</label><input type="time" id="time" required></div></div>
+        <small id="zone"></small>
         <label class="check-label"><input type="checkbox" id="weekly"> Раз в неделю</label>
       </div>
       <button class="submit" type="submit">Сохранить задачу</button>
       <p id="form-error" class="error" role="alert" hidden></p>
     </form>
   </dialog>
-  <dialog id="move-dialog">
+  <dialog id="move-dialog" aria-labelledby="move-heading">
     <form id="move-form">
-      <div class="dialog-head"><h2>Перенести задачу</h2><button type="button" id="move-close" class="close" aria-label="Закрыть">×</button></div>
+      <div class="dialog-head"><h2 id="move-heading">Перенести задачу</h2><button type="button" id="move-close" class="close" aria-label="Закрыть">×</button></div>
       <p id="move-task-title" class="muted"></p>
       <label for="move-reason">Что мешает? (необязательно)</label>
       <select id="move-reason"><option value="busy">Занят другим</option><option value="tired">Нет сил</option><option value="stuck">Не знаю, с чего начать</option><option value="avoid">Не хочу сейчас</option></select>
