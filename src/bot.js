@@ -121,8 +121,9 @@ export function createBot(config, store, options) {
   }
   const today = () => localDate(new Date(), config.timeZone);
   const menu = () => {
-    const k = new Keyboard().text('➕ Создать задачку').text('📋 Мои задачи').row();
-    if (config.publicUrl) k.webApp('📱 Открыть мои дела', config.publicUrl);
+    const k = new Keyboard();
+    if(config.publicUrl) k.webApp('📋 Мои задачи',config.publicUrl);
+    else k.text('➕ Создать задачку').text('📋 Мои задачи');
     return k.resized().persistent();
   };
   const actions = task => new InlineKeyboard()

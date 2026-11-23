@@ -13,3 +13,8 @@ dialog select{width:100%;background:var(--bg);border:1px solid var(--border);col
 .move-presets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:18px}
 .move-presets button{border:1px solid #40506c;border-radius:10px;padding:11px 6px;background:#25354c;color:#d5e3ff;font-size:12px}
 .task-content{min-width:0}
+
+#task-list { margin-top: 16px }
+.task-content summary { cursor:pointer; margin-top:8px; color:var(--muted); font-size:13px }
+#schedule .flatpickr-calendar { max-width:100% }
+#schedule .flatpickr-calendar input { min-height:0; padding:0; border:0; color:inherit; background:transparent }

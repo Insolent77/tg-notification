@@ -7,44 +7,28 @@
   <title>Мои дела — TG Notification</title>
   <link rel="stylesheet" href="/style.css" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="/flatpickr/themes/dark.css">
+  <script defer src="/flatpickr/flatpickr.min.js"></script>
+  <script defer src="/flatpickr/l10n/ru.js"></script>
   <script type="module" src="/app.js" defer></script>
 </head>
 <body>
   <main class="page">
-    <header class="header">
-      <div><p class="eyebrow">ЛИЧНЫЙ ПЛАНЕР</p><h1>Мои дела<span class="period">.</span></h1><p class="muted" id="today-label"></p></div>
-      <div class="avatar" aria-hidden="true">✓</div>
-    </header>
-    <section class="stats" aria-label="Статистика">
-      <div class="stat"><span class="stat-num" id="active-count">—</span><span class="stat-caption">Активных задач</span></div>
-      <div class="stat"><span class="stat-num" id="done-count">—</span><span class="stat-caption">Выполнено</span></div>
-    </section>
-    <nav class="tabs" aria-label="Период">
-      <button class="tab active" data-tab="today">Сегодня</button>
-      <button class="tab" data-tab="tomorrow">Завтра</button>
-      <button class="tab" data-tab="all">Все задачи</button>
-    </nav>
-    <section class="focus-panel" id="focus-panel">
-      <div class="focus-heading"><span>✦</span><strong>На чём сосредоточиться</strong></div>
-      <div id="focus-tasks" class="focus-tasks"></div>
-    </section>
-    <div class="categories" id="categories"></div>
-    <div class="section-head"><h2 id="section-title">Сегодня</h2><span id="visible-count" class="pill">0</span></div>
+    <header><h1>Мои задачи</h1></header>
+    <button id="add-button" class="add-button" disabled>＋ Создать задачу</button>
     <section id="task-list" class="task-list" aria-live="polite"></section>
-    <button id="add-button" class="add-button"><span class="add-icon">＋</span> Создать задачу</button>
     <p id="error" class="error" role="alert" hidden></p>
   </main>
   <dialog id="task-dialog">
     <form id="task-form">
       <div class="dialog-head"><h2>Новая задача</h2><button type="button" id="close-dialog" class="close" aria-label="Закрыть">×</button></div>
       <label for="title">Название</label><input id="title" name="title" required maxlength="200" placeholder="Что нужно сделать?" />
-      <label for="category">Категория</label><input id="category" name="category" maxlength="40" list="category-options" value="Личное" required />
-      <datalist id="category-options"><option value="Личное"><option value="Работа"><option value="Дом"><option value="Автомобиль"></datalist>
-      <label for="priority">Приоритет</label>
-      <select id="priority" name="priority"><option value="high">🔴 Важно</option><option value="medium" selected>🟡 Обычная</option><option value="low">⚪ Не срочно</option></select>
       <label class="check-label"><input id="remind" type="checkbox" checked /> Напомнить в указанное время</label>
-      <label for="date-time" id="date-time-label">Дата и время</label><input id="date-time" type="datetime-local" required />
-      <p class="hint">Если не отметишь задачу выполненной, бот повторит напоминание через 10 минут.</p>
+      <div id="schedule">
+        <label for="day">Дата</label><input type="date" id="day" required>
+        <label for="time">Время <span id="zone"></span></label><input type="time" id="time" required>
+        <label class="check-label"><input type="checkbox" id="weekly"> Раз в неделю</label>
+      </div>
       <button class="submit" type="submit">Сохранить задачу</button>
       <p id="form-error" class="error" role="alert" hidden></p>
     </form>

@@ -48,7 +48,8 @@ export function createServer(config,store,savePicker) {
   };
   const create=(req,res)=>{
     const {title,category,due_at,priority}=req.body||{};
-    const task=store.create({title,category,dueAt:due_at,priority});
+    const recurrence=req.path==='/api/tasks' ? req.body?.recurrence : null;
+    const task=store.create({title,category,dueAt:due_at,priority,recurrence});
     res.status(201).json({task});
   };
   app.get('/api/tasks',tgAuth,(_req,res)=>res.json({timeZone:config.timeZone,tasks:store.list(),recommended:rankTasks(store.list().filter(t=>t.due_at && localDate(new Date(t.due_at),config.timeZone)<=localDate(new Date(),config.timeZone))).slice(0,3).map(t=>t.id)}));

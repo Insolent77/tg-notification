@@ -2,9 +2,8 @@ import {localDate,localTime,localToIso,shiftLocalDate} from './dates.js';
 const tg=window.Telegram?.WebApp;
 tg?.ready();
 tg?.expand();
-const state={tasks:[],recommended:[],tab:'today',category:'Все',movingId:null};
+const state={tasks:[],movingId:null};
 const $=id=>document.getElementById(id);
-const labels={today:'Сегодня',tomorrow:'Завтра',all:'Все задачи'};
 const dateKey=date=>localDate(date,state.zone);
 const inputValue=date=>dateKey(date)+'T'+localTime(date,state.zone);
 const fromInput=value=>localToIso(...value.split('T'),state.zone);
@@ -25,25 +24,6 @@ const make=(tag,cls,text)=>{
   if(text!==undefined)el.textContent=text;
   return el;
 };
-function filtered() {
-  return state.tasks.filter(t=>{
-    if(state.category!=='Все'&&t.category!==state.category)return false;
-    if(state.tab==='all')return true;
-    if(!t.due_at)return false;
-    const key=dateKey(new Date(t.due_at));
-    const today=dateKey(new Date());
-    return key===(state.tab==='today'?today:shiftLocalDate(today,1));
-  });
-}
-function renderCategories() {
-  const categories=['Все',...new Set([...['Личное','Дом','Работа','Автомобиль'],...state.tasks.map(t=>t.category)])];
-  const root=$('categories');root.replaceChildren();
-  for(const category of categories){
-    const btn=make('button','category'+(state.category===category?' active':''),category);
-    btn.onclick=()=>{state.category=category;render();};
-    root.append(btn);
-  }
-}
 function formatDue(value){
   if(!value)return 'Без напоминания';
   return '◷ '+new Intl.DateTimeFormat('ru-RU',{timeZone:state.zone,day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}).format(new Date(value));
@@ -84,31 +64,12 @@ $('move-form').onsubmit=e=>{
   if(!value)return;
   try{reschedule(fromInput(value));}catch(error){showError(error.message,'move-error');}
 };
-function renderFocus(){
-  const root=$('focus-tasks');root.replaceChildren();
-  const byId=new Map(state.tasks.map(t=>[t.id,t]));
-  const tasks=state.recommended.map(id=>byId.get(id)).filter(Boolean);
-  if(!tasks.length){root.append(make('p','muted','План пока свободный. Можно добавить главное дело на сегодня.'));return;}
-  tasks.forEach((task,i)=>{
-    const el=make('div','focus-task');
-    el.append(make('span','focus-index',String(i+1)),make('span','',task.title));
-    root.append(el);
-  });
-}
-
 function render() {
-  $('active-count').textContent=state.tasks.filter(t=>t.status==='active').length;
-  $('done-count').textContent=state.tasks.filter(t=>t.status==='done').length;
-  $('section-title').textContent=labels[state.tab];
-  document.querySelectorAll('.tab').forEach(btn=>btn.classList.toggle('active',btn.dataset.tab===state.tab));
-  renderCategories();
-  renderFocus();
-  const tasks=filtered();
-  $('visible-count').textContent=tasks.length;
+  const tasks=state.tasks.filter(task=>task.status==='active');
   const root=$('task-list');root.replaceChildren();
   if(!tasks.length){
     const empty=make('div','empty');
-    empty.append(make('strong','',state.tab==='today'?'На сегодня всё свободно':'Здесь пока нет задач'),make('span','','Нажми «Создать задачу», чтобы добавить дело.'));
+    empty.append(make('strong','','Пока нет активных задач'),make('span','','Нажми «Создать задачу», чтобы добавить дело.'));
     root.append(empty);return;
   }
   for(const task of tasks){
@@ -145,43 +106,47 @@ function render() {
         catch(e){showError(e.message);}
       };
       controls.append(begin,progress,delay,select);
-      content.append(controls);
+      const details=make('details');
+      details.append(make('summary','','Действия'),controls);
+      content.append(details);
     }
     root.append(item);
   }
 }
 async function refresh(){
-  try{const data=await request('/api/tasks');state.zone=data.timeZone;$('today-label').textContent=dateKey(new Date())+' · '+state.zone;$('add-button').disabled=false;state.tasks=data.tasks;state.recommended=data.recommended||[];showError('');render();}
+  try{const data=await request('/api/tasks');state.zone=data.timeZone;$('zone').textContent='('+state.zone+')';$('add-button').disabled=false;state.tasks=data.tasks;showError('');render();}
   catch(e){showError(e.message);}
 }
-document.querySelectorAll('.tab').forEach(btn=>btn.onclick=()=>{state.tab=btn.dataset.tab;state.category='Все';render();});
 const dialog=$('task-dialog');
 $('add-button').onclick=()=>{
   $('task-form').reset();
-  $('date-time').value=inputValue(new Date(Date.now()+3600000));
-  $('date-time').disabled=false;
-  $('date-time').required=true;
-  $('category').value='Личное';
-  $('priority').value='medium';
+  const initial=new Date(Date.now()+3600000);
+  $('schedule').hidden=false;
+  $('day').disabled=false;
+  $('time').disabled=false;
+  $('day').value=dateKey(initial);
+  $('time').value=localTime(initial,state.zone);
+  if(window.flatpickr) flatpickr($('day'),{locale:'ru',disableMobile:true,inline:true,minDate:dateKey(new Date()),defaultDate:dateKey(initial),dateFormat:'Y-m-d'});
   showError('','form-error');
   dialog.showModal();
 };
 $('close-dialog').onclick=()=>dialog.close();
 $('remind').onchange=()=>{
-  $('date-time').disabled=!$('remind').checked;
-  $('date-time').required=$('remind').checked;
-  $('date-time-label').style.opacity=$('remind').checked?'1':'0.4';
+  $('schedule').hidden=!$('remind').checked;
+  $('day').disabled=$('time').disabled=!$('remind').checked;
 };
 $('task-form').onsubmit=async event=>{
   event.preventDefault();
   const title=$('title').value.trim();
-  const category=$('category').value.trim()||'Личное';
-  const priority=$('priority').value;
+  const submit=event.submitter || $('task-form').querySelector('button[type=submit]');
+  if(submit.disabled) return;
+  submit.disabled=true;
   try {
-    const when=$('remind').checked?fromInput($('date-time').value):null;
-    await request('/api/tasks',{method:'POST',body:JSON.stringify({title,category,priority,due_at:when})});
+    const when=$('remind').checked?localToIso($('day').value,$('time').value,state.zone):null;
+    const recurrence=when && $('weekly').checked?'weekly':null;
+    await request('/api/tasks',{method:'POST',body:JSON.stringify({title,due_at:when,recurrence})});
     dialog.close();await refresh();
-  } catch(e){showError(e.message,'form-error');}
+  } catch(e){showError(e.message,'form-error');} finally {submit.disabled=false;}
 };
 $('add-button').disabled=true;
 refresh();
