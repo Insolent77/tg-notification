@@ -67,7 +67,7 @@ export function createBot(config, store, options) {
       if(h%6===5)keyboard.row();
     }
     keyboard.text('‹ К календарю','pick:'+state.pickerId+':m:'+state.date.slice(0,7));
-    return updatePrompt(ctx,(notice ? notice+'\n\n' : '')+'Дата: '+state.date+'\nВыбери час ('+config.timeZone+').',{reply_markup:keyboard});
+    return updatePrompt(ctx,(notice ? notice+'\n\n' : '')+'Дата: '+state.date+'\nНапиши время, например 18:00, или выбери час кнопкой ('+config.timeZone+').',{reply_markup:keyboard});
   }
   async function minutes(ctx,state) {
     state.step='picker-minute';
@@ -78,7 +78,7 @@ export function createBot(config, store, options) {
       if(m%10===9)keyboard.row();
     }
     keyboard.text('‹ К часам','pick:'+state.pickerId+':back');
-    return updatePrompt(ctx,'Дата: '+state.date+' · '+state.hour+':__\nВыбери минуты.',{reply_markup:keyboard});
+    return updatePrompt(ctx,'Дата: '+state.date+' · '+state.hour+':__\nНапиши время целиком, например 18:00, или выбери минуты кнопкой.',{reply_markup:keyboard});
   }
   async function beginPicker(ctx,state,mode,date) {
     state.pickerId=String(++pickerSequence);
@@ -207,6 +207,10 @@ export function createBot(config, store, options) {
       } else await updatePrompt(ctx,'Можешь открыть список дел или создать новую задачу. Для свободного диалога потребуется OPENAI_API_KEY.');
       return;
     }
+    if(state.step==='picker-hour' || state.step==='picker-minute') {
+      if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(text)) return hours(ctx,state,'Введи время в формате ЧЧ:ММ, например 18:00.');
+      return applyPickedTime(ctx,state,text);
+    }
     if(state.step==='editname' || state.step==='edittime') {
       try {
         let changes={revision:state.revision};
@@ -278,25 +282,9 @@ export function createBot(config, store, options) {
     if(choice==='none'){state.dueAt=null;state.step='category';return updatePrompt(ctx,'Выбери категорию:',{reply_markup:categoryButtons()});}
     return beginPicker(ctx,state,'create',choice==='today'?today():shiftLocalDate(today(),1));
   });
-  bot.callbackQuery(/^pick:(\d+):(m|d|h|n|back)(?::([0-9-]+))?$/,async ctx=>{
-    const state=flows.get(ctx.from.id);
-    const [,id,action,value]=ctx.match;
-    await ctx.answerCallbackQuery();
-    if(!state || state.pickerId!==id || state.messageId!==ctx.callbackQuery.message.message_id) return;
-    if(action==='m' && (state.step==='picker-date'||state.step==='picker-hour')) return calendar(ctx,state,value);
-    if(action==='d' && state.step==='picker-date') {
-      if(value.slice(0,7)!==state.pickerMonth || value<today()) return;
-      state.date=value;
-      return hours(ctx,state);
-    }
-    if(action==='h' && state.step==='picker-hour' && /^(?:[01]\d|2[0-3])$/.test(value||'')) {
-      state.hour=value;
-      return minutes(ctx,state);
-    }
-    if(action==='back' && state.step==='picker-minute') return hours(ctx,state);
-    if(action!=='n' || state.step!=='picker-minute' || !/^[0-5]\d$/.test(value||'')) return;
+  async function applyPickedTime(ctx,state,timeText) {
     try {
-      const dueAt=localToIso(state.date,state.hour+':'+value,config.timeZone);
+      const dueAt=localToIso(state.date,timeText,config.timeZone);
       if(Date.parse(dueAt)<=Date.now()) throw new Error('Это время уже прошло. Выбери другое.');
       if(state.pickerMode==='create') {
         state.dueAt=dueAt;
@@ -317,6 +305,25 @@ export function createBot(config, store, options) {
     } catch(error) {
       await hours(ctx,state,error.message);
     }
+  }
+  bot.callbackQuery(/^pick:(\d+):(m|d|h|n|back)(?::([0-9-]+))?$/,async ctx=>{
+    const state=flows.get(ctx.from.id);
+    const [,id,action,value]=ctx.match;
+    await ctx.answerCallbackQuery();
+    if(!state || state.pickerId!==id || state.messageId!==ctx.callbackQuery.message.message_id) return;
+    if(action==='m' && (state.step==='picker-date'||state.step==='picker-hour')) return calendar(ctx,state,value);
+    if(action==='d' && state.step==='picker-date') {
+      if(value.slice(0,7)!==state.pickerMonth || value<today()) return;
+      state.date=value;
+      return hours(ctx,state);
+    }
+    if(action==='h' && state.step==='picker-hour' && /^(?:[01]\d|2[0-3])$/.test(value||'')) {
+      state.hour=value;
+      return minutes(ctx,state);
+    }
+    if(action==='back' && state.step==='picker-minute') return hours(ctx,state);
+    if(action!=='n' || state.step!=='picker-minute' || !/^[0-5]\d$/.test(value||'')) return;
+    return applyPickedTime(ctx,state,state.hour+':'+value);
   });
   bot.callbackQuery(/^repeat:(none|weekly)$/,async ctx=>{
     const state=flows.get(ctx.from.id);
