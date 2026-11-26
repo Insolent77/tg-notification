@@ -30,7 +30,9 @@ export function createServer(config,store,savePicker, members=new Map([[config.o
   const tgAuth=(req,res,next)=>{
     const signedData=req.get('X-Telegram-Init-Data');
     for(const [id,member] of members){
-      if(verifyTelegramInitData(signedData,config.botToken,id)){
+      const allowed=signedData ? verifyTelegramInitData(signedData,config.botToken,id)
+        : req.path.startsWith('/api/tasks') && member.store.acceptsKeyboard(req.get('X-Keyboard-Ticket'),req.get('X-Keyboard-Device'));
+      if(allowed){
         req.member=member;
         return next();
       }

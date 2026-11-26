@@ -122,16 +122,14 @@ export function createBot(config, store, options) {
   const today = () => localDate(new Date(), config.timeZone);
   const createLabel = '➕ Создать задачу';
   const listLabel = '📋 Мои задачи';
-  const menu = () => new Keyboard().text(createLabel).text(listLabel).resized().persistent();
-  function appButtons(view) {
-    const keyboard = new InlineKeyboard();
-    if (view !== 'list') {
-      const url = new URL(config.publicUrl);
-      url.searchParams.set('view','create');
-      keyboard.webApp(createLabel,url.href);
-    }
-    if (view !== 'create') keyboard.webApp(listLabel,config.publicUrl);
-    return keyboard;
+  function menu() {
+    const keyboard = new Keyboard().resized().persistent();
+    if (!config.publicUrl) return keyboard.text(createLabel).text(listLabel);
+    const url = new URL(config.publicUrl);
+    url.hash = new URLSearchParams({keyboard:store.issueKeyboard()}).toString();
+    const listUrl = url.href;
+    url.searchParams.set('view','create');
+    return keyboard.webApp(createLabel,url.href).webApp(listLabel,listUrl);
   }
   const actions = task => new InlineKeyboard()
     .text('▶️ Начинаю','start:'+task.id).text('🙅 Пока не могу','cant:'+task.id).row()
@@ -227,7 +225,6 @@ export function createBot(config, store, options) {
   bot.command('start',async ctx=>{
     const greeting='Привет! Я напомню о задачах и буду повторять уведомления до выполнения.';
     await ctx.reply(greeting,{reply_markup:menu()});
-    if (config.publicUrl) return ctx.reply('Открыть в приложении:',{reply_markup:appButtons()});
   });
   bot.command('id',ctx=>ctx.reply('Твой Telegram ID: '+ctx.from.id));
   bot.command('tasks',showTasks);
@@ -240,12 +237,10 @@ export function createBot(config, store, options) {
   };
   bot.command('new',start);
   bot.hears('➕ Создать задачку',start);
-  bot.hears(createLabel,ctx=>config.publicUrl
-    ? ctx.reply('Новая задача',{reply_markup:appButtons('create')})
-    : start(ctx));
-  bot.hears(listLabel,ctx=>config.publicUrl
-    ? ctx.reply('Список задач',{reply_markup:appButtons('list')})
-    : showTasks(ctx));
+  // A tap on an old text keyboard replaces it for the next launch.
+  const replaceMenu = ctx=>ctx.reply('Кнопки обновлены.',{reply_markup:menu()});
+  bot.hears(createLabel,config.publicUrl ? replaceMenu : start);
+  bot.hears(listLabel,config.publicUrl ? replaceMenu : showTasks);
 
   bot.on('message:text',async ctx=>{
     const text=ctx.message.text.trim();

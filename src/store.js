@@ -1,3 +1,4 @@
+import {createHash,randomBytes} from 'node:crypto';
 import Database from 'better-sqlite3';
 import {localDate, localTime, localToIso, shiftLocalDate} from './dates.js';
 import { mkdirSync } from 'node:fs';
@@ -9,6 +10,9 @@ export function openStore(path, ownerId, timeZone = 'Europe/Moscow') {
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');
   db.exec(`
+    CREATE TABLE IF NOT EXISTS keyboard_logins (
+      owner_id INTEGER PRIMARY KEY, ticket_hash TEXT NOT NULL, device_hash TEXT, issued_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS recurring_tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER NOT NULL,
       title TEXT NOT NULL, category TEXT NOT NULL, priority TEXT NOT NULL,
@@ -74,7 +78,25 @@ export function openStore(path, ownerId, timeZone = 'Europe/Moscow') {
     const date = new Date(iso);
     return localToIso(shiftLocalDate(localDate(date,timeZone),7),localTime(date,timeZone),timeZone);
   }
+  const digest = value=>createHash('sha256').update(value).digest('hex');
   const store = {
+    issueKeyboard() {
+      const ticket=randomBytes(32).toString('hex');
+      db.prepare('INSERT OR REPLACE INTO keyboard_logins(owner_id,ticket_hash,issued_at) VALUES(?,?,?)')
+        .run(ownerId,digest(ticket),Date.now());
+      return ticket;
+    },
+    acceptsKeyboard(ticket,device) {
+      if (![ticket,device].every(value=>typeof value==='string' && /^[0-9a-f]{64}$/.test(value))) return false;
+      const ticketHash=digest(ticket), deviceHash=digest(device);
+      const login=db.prepare('SELECT device_hash,issued_at FROM keyboard_logins WHERE owner_id=? AND ticket_hash=?')
+        .get(ownerId,ticketHash);
+      if (!login) return false;
+      if (login.device_hash) return login.device_hash===deviceHash && Date.now()-login.issued_at<90*86400000;
+      // Only the first device opening this private keyboard within 15 minutes can bind it.
+      return db.prepare('UPDATE keyboard_logins SET device_hash=? WHERE owner_id=? AND ticket_hash=? AND device_hash IS NULL AND issued_at>=?')
+        .run(deviceHash,ownerId,ticketHash,Date.now()-15*60000).changes===1;
+    },
     advanceRecurring: db.transaction(() => {
       const rows=db.prepare('SELECT * FROM recurring_tasks WHERE owner_id=? AND next_at<=?').all(ownerId,now());
       for(const series of rows) {

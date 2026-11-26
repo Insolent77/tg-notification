@@ -8,13 +8,24 @@ const dateKey=date=>localDate(date,state.zone);
 const inputValue=date=>dateKey(date)+'T'+localTime(date,state.zone);
 const fromInput=value=>localToIso(...value.split('T'),state.zone);
 function showError(message,id='error'){const el=$(id);el.hidden=!message;el.textContent=message||'';}
+const keyboardTicket=new URLSearchParams(location.hash.slice(1)).get('keyboard') || window.Telegram?.WebView?.initParams?.keyboard;
+function authHeaders() {
+  if (tg?.initData) return {'X-Telegram-Init-Data':tg.initData};
+  if (!keyboardTicket) throw new Error('Открой приложение из личного чата с ботом.');
+  let device=localStorage.getItem('taskKeyboardDevice');
+  if (!device) {
+    device=Array.from(crypto.getRandomValues(new Uint8Array(32)),byte=>byte.toString(16).padStart(2,'0')).join('');
+    localStorage.setItem('taskKeyboardDevice',device);
+  }
+  return {'X-Keyboard-Ticket':keyboardTicket,'X-Keyboard-Device':device};
+}
 async function request(path,options={}) {
-  if(!tg?.initData)throw new Error('Открой приложение кнопкой под сообщением бота в Telegram.');
   const response=await fetch(path,{
     ...options,
-    headers:{'Content-Type':'application/json','X-Telegram-Init-Data':tg.initData,...options.headers}
+    headers:{'Content-Type':'application/json',...authHeaders(),...options.headers}
   });
   const json=await response.json().catch(()=>({}));
+  if(response.status===401 && keyboardTicket)throw new Error('Обнови кнопки командой /start и открой приложение ещё раз на этом устройстве.');
   if(!response.ok)throw new Error(json.error||'Ошибка сервера ('+response.status+')');
   return json;
 }
