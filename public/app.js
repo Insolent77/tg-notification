@@ -2,7 +2,8 @@ import {localDate,localTime,localToIso,shiftLocalDate} from './dates.js';
 const tg=window.Telegram?.WebApp;
 tg?.ready();
 tg?.expand();
-const state={tasks:[],movingId:null};
+const state={tasks:[],movingId:null,day:null};
+let launchCreate=new URLSearchParams(location.search).get('view')==='create';
 const $=id=>document.getElementById(id);
 const dateKey=date=>localDate(date,state.zone);
 const inputValue=date=>dateKey(date)+'T'+localTime(date,state.zone);
@@ -69,6 +70,7 @@ function openMove(id){
   const task=state.tasks.find(t=>t.id===id);
   if(!task)return;
   state.movingId=id;
+  $('move-reason').value='unspecified';
   $('move-task-title').textContent=task.title;
   $('move-error').hidden=true;
   const date=new Date(Date.now()+3600000);
@@ -92,12 +94,37 @@ $('move-form').onsubmit=e=>{
   if(!value)return;
   try{reschedule(fromInput(value));}catch(error){showError(error.message,'move-error');}
 };
+function dayLabel(key,options){
+  return new Intl.DateTimeFormat('ru-RU',{timeZone:'UTC',...options}).format(new Date(key+'T12:00:00Z'));
+}
 function render() {
-  const tasks=state.tasks.filter(task=>task.status==='active');
+  const today=dateKey(new Date());
+  const tomorrow=shiftLocalDate(today,1);
+  const active=state.tasks.filter(task=>task.status==='active');
+  const taskDay=task=>task.due_at ? dateKey(new Date(task.due_at)) : 'none';
+  const later=[...new Set(active.map(taskDay))].filter(key=>key>shiftLocalDate(today,2) && key!=='none').sort();
+  const keys=[today,tomorrow,shiftLocalDate(today,2),'none',...later];
+  if(!keys.includes(state.day))state.day=today;
+  $('today-label').textContent=dayLabel(today,{weekday:'short',day:'numeric',month:'long'});
+  const tabs=keys.map(key=>{
+    const tab=make('button','day-tab');
+    const undated=key==='none';
+    tab.append(make('span','',undated?'Без даты':dayLabel(key,{weekday:'short'})),
+      make('strong','',undated?'∞':dayLabel(key,key>shiftLocalDate(today,2)?{day:'numeric',month:'short'}:{day:'numeric'})));
+    tab.setAttribute('aria-pressed',String(key===state.day));
+    tab.setAttribute('aria-label',undated?'Без даты':dayLabel(key,{day:'numeric',month:'long',year:'numeric'}));
+    tab.onclick=()=>{state.day=key;render();$('days').querySelector('[aria-pressed=true]').focus({preventScroll:true});};
+    return tab;
+  });
+  $('days').replaceChildren(...tabs);
+  $('days').querySelector('[aria-pressed=true]').scrollIntoView({block:'nearest',inline:'nearest'});
+  $('day-heading').textContent=state.day==='none'?'Без даты':state.day===today?'Сегодня':state.day===tomorrow?'Завтра':dayLabel(state.day,{day:'numeric',month:'long'});
+  const tasks=active.filter(task=>taskDay(task)===state.day || (state.day===today && taskDay(task)<today))
+    .sort((a,b)=>(a.due_at||'').localeCompare(b.due_at||''));
   const root=$('task-list');root.replaceChildren();
   if(!tasks.length){
     const empty=make('div','empty');
-    empty.append(make('strong','','Пока нет активных задач'),make('span','','Нажми «Создать задачу», чтобы добавить дело.'));
+    empty.append(make('strong','',state.day==='none'?'Нет задач без даты':'На этот день задач нет'),make('span','','Нажми «Создать задачу», чтобы добавить дело.'));
     root.append(empty);
   }
   const completed=state.tasks.filter(task=>task.status==='done')
@@ -117,10 +144,11 @@ function render() {
     content.append(make('div','task-name',task.title));
     const meta=make('div','meta');
     const badge=make('span','',priorityLabels[task.priority] || priorityLabels.medium);
-    meta.append(make('span','',task.category),badge,make('span','',formatDue(task.due_at)));
+    meta.append(make('span','',task.category),badge);
+    if(done || (task.due_at && taskDay(task)<today))meta.append(make('span','', (done?'':'Просрочено · ')+formatDue(task.due_at)));
     if(task.progress_count)meta.append(make('span','','Прогресс: '+task.progress_count));
     content.append(meta);
-    item.append(check,content);
+    item.append(make('span','clock',task.due_at?localTime(new Date(task.due_at),state.zone):'—'),content,check);
     if(!done){
       const controls=make('div','task-actions');
       const begin=make('button','action-button','▶ Начинаю');
@@ -152,9 +180,10 @@ function render() {
   }
 }
 async function refresh(){
-  try{const data=await request('/api/tasks');state.zone=data.timeZone;$('zone').textContent='Часовой пояс · '+state.zone;$('add-button').disabled=false;state.tasks=data.tasks;showError('');render();return true;}
-  catch(e){showError(e.message);}
+  try{const data=await request('/api/tasks');state.zone=data.timeZone;$('zone').textContent='Часовой пояс · '+state.zone;$('add-button').disabled=false;state.tasks=data.tasks;showError('');$('retry').hidden=true;render();if(launchCreate){launchCreate=false;openCreateForm();}return true;}
+  catch(e){showError(e.message);$('retry').hidden=false;}
 }
+$('retry').onclick=refresh;
 const dialog=$('task-dialog');
 function openCreateForm(){
   $('task-form').reset();
@@ -162,7 +191,8 @@ function openCreateForm(){
   $('schedule').hidden=false;
   $('day').disabled=false;
   $('time').disabled=false;
-  $('day').value=dateKey(initial);
+  $('day').value=state.day && state.day!=='none' && state.day>dateKey(new Date()) ? state.day : dateKey(initial);
+  if(state.day==='none'){ $('remind').checked=false;$('remind').onchange(); }
   $('time').value=localTime(initial,state.zone);
   $('day').min=dateKey(new Date());
   showError('','form-error');
@@ -184,10 +214,9 @@ $('task-form').onsubmit=async event=>{
     const when=$('remind').checked?localToIso($('day').value,$('time').value,state.zone):null;
     const recurrence=when && $('weekly').checked?'weekly':null;
     await request('/api/tasks',{method:'POST',body:JSON.stringify({title,due_at:when,recurrence,priority:$('task-form').elements.priority.value})});
+    state.day=when?dateKey(new Date(when)):'none';
     dialog.close();await refresh();
   } catch(e){showError(e.message,'form-error');} finally {submit.disabled=false;}
 };
 $('add-button').disabled=true;
-refresh().then(loaded=>{
-  if (loaded && new URLSearchParams(location.search).get('view')==='create') openCreateForm();
-});
+refresh();
