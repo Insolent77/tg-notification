@@ -120,10 +120,19 @@ export function createBot(config, store, options) {
     return calendar(ctx,state,today().slice(0,7));
   }
   const today = () => localDate(new Date(), config.timeZone);
-  const menu = () => {
-    if(config.publicUrl) return new InlineKeyboard().webApp('📋 Мои задачи',config.publicUrl);
-    return new Keyboard().text('➕ Создать задачку').text('📋 Мои задачи').resized().persistent();
-  };
+  const createLabel = '➕ Создать задачу';
+  const listLabel = '📋 Мои задачи';
+  const menu = () => new Keyboard().text(createLabel).text(listLabel).resized().persistent();
+  function appButtons(view) {
+    const keyboard = new InlineKeyboard();
+    if (view !== 'list') {
+      const url = new URL(config.publicUrl);
+      url.searchParams.set('view','create');
+      keyboard.webApp(createLabel,url.href);
+    }
+    if (view !== 'create') keyboard.webApp(listLabel,config.publicUrl);
+    return keyboard;
+  }
   const actions = task => new InlineKeyboard()
     .text('▶️ Начинаю','start:'+task.id).text('🙅 Пока не могу','cant:'+task.id).row()
     .text('📈 Есть прогресс','progress:'+task.id).text('✅ Сделано','done:'+task.id);
@@ -134,7 +143,7 @@ export function createBot(config, store, options) {
   const whenLabel = task => task.due_at?localDate(new Date(task.due_at),config.timeZone)+' '+localTime(new Date(task.due_at),config.timeZone):'без напоминания';
   const showTasks = async ctx => {
     const tasks = rankTasks(store.list());
-    if (!tasks.length) return ctx.reply('Активных задач пока нет. Нажми «➕ Создать задачку».');
+    if (!tasks.length) return ctx.reply('Активных задач пока нет. Нажми «➕ Создать задачу».');
     const heading = '📋 <b>Твои активные задачи по приоритету</b>\n\n';
     let message = heading;
     for (const t of tasks.slice(0,30)) {
@@ -217,10 +226,8 @@ export function createBot(config, store, options) {
   });
   bot.command('start',async ctx=>{
     const greeting='Привет! Я напомню о задачах и буду повторять уведомления до выполнения.';
-    if (!config.publicUrl) return ctx.reply(greeting,{reply_markup:menu()});
-    // Telegram removes an existing reply keyboard only on an explicit removal message.
-    await ctx.reply(greeting,{reply_markup:{remove_keyboard:true}});
-    return ctx.reply('Открыть список задач:',{reply_markup:menu()});
+    await ctx.reply(greeting,{reply_markup:menu()});
+    if (config.publicUrl) return ctx.reply('Открыть в приложении:',{reply_markup:appButtons()});
   });
   bot.command('id',ctx=>ctx.reply('Твой Telegram ID: '+ctx.from.id));
   bot.command('tasks',showTasks);
@@ -233,7 +240,12 @@ export function createBot(config, store, options) {
   };
   bot.command('new',start);
   bot.hears('➕ Создать задачку',start);
-  bot.hears('📋 Мои задачи',showTasks);
+  bot.hears(createLabel,ctx=>config.publicUrl
+    ? ctx.reply('Новая задача',{reply_markup:appButtons('create')})
+    : start(ctx));
+  bot.hears(listLabel,ctx=>config.publicUrl
+    ? ctx.reply('Список задач',{reply_markup:appButtons('list')})
+    : showTasks(ctx));
 
   bot.on('message:text',async ctx=>{
     const text=ctx.message.text.trim();

@@ -9,7 +9,7 @@ const inputValue=date=>dateKey(date)+'T'+localTime(date,state.zone);
 const fromInput=value=>localToIso(...value.split('T'),state.zone);
 function showError(message,id='error'){const el=$(id);el.hidden=!message;el.textContent=message||'';}
 async function request(path,options={}) {
-  if(!tg?.initData)throw new Error('Закрой это окно, отправь боту /start и нажми «📋 Мои задачи» под новым сообщением.');
+  if(!tg?.initData)throw new Error('Открой приложение кнопкой под сообщением бота в Telegram.');
   const response=await fetch(path,{
     ...options,
     headers:{'Content-Type':'application/json','X-Telegram-Init-Data':tg.initData,...options.headers}
@@ -141,11 +141,11 @@ function render() {
   }
 }
 async function refresh(){
-  try{const data=await request('/api/tasks');state.zone=data.timeZone;$('zone').textContent='Часовой пояс · '+state.zone;$('add-button').disabled=false;state.tasks=data.tasks;showError('');render();}
+  try{const data=await request('/api/tasks');state.zone=data.timeZone;$('zone').textContent='Часовой пояс · '+state.zone;$('add-button').disabled=false;state.tasks=data.tasks;showError('');render();return true;}
   catch(e){showError(e.message);}
 }
 const dialog=$('task-dialog');
-$('add-button').onclick=()=>{
+function openCreateForm(){
   $('task-form').reset();
   const initial=new Date(Date.now()+3600000);
   $('schedule').hidden=false;
@@ -156,7 +156,8 @@ $('add-button').onclick=()=>{
   $('day').min=dateKey(new Date());
   showError('','form-error');
   dialog.showModal();
-};
+}
+$('add-button').onclick=openCreateForm;
 $('close-dialog').onclick=()=>dialog.close();
 $('remind').onchange=()=>{
   $('schedule').hidden=!$('remind').checked;
@@ -176,4 +177,6 @@ $('task-form').onsubmit=async event=>{
   } catch(e){showError(e.message,'form-error');} finally {submit.disabled=false;}
 };
 $('add-button').disabled=true;
-refresh();
+refresh().then(loaded=>{
+  if (loaded && new URLSearchParams(location.search).get('view')==='create') openCreateForm();
+});
