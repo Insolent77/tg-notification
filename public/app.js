@@ -10,23 +10,41 @@ const inputValue=date=>dateKey(date)+'T'+localTime(date,state.zone);
 const fromInput=value=>localToIso(...value.split('T'),state.zone);
 function showError(message,id='error'){const el=$(id);el.hidden=!message;el.textContent=message||'';}
 const keyboardTicket=new URLSearchParams(location.hash.slice(1)).get('keyboard') || window.Telegram?.WebView?.initParams?.keyboard;
-function authHeaders() {
-  if (tg?.initData) return {'X-Telegram-Init-Data':tg.initData};
-  if (!keyboardTicket) throw new Error('Открой приложение из личного чата с ботом.');
+function deviceKey() {
   let device=localStorage.getItem('taskKeyboardDevice');
   if (!device) {
     device=Array.from(crypto.getRandomValues(new Uint8Array(32)),byte=>byte.toString(16).padStart(2,'0')).join('');
     localStorage.setItem('taskKeyboardDevice',device);
   }
-  return {'X-Keyboard-Ticket':keyboardTicket,'X-Keyboard-Device':device};
+  return device;
 }
+function authHeaders() {
+  if (new URLSearchParams(tg?.initData).has('user')) return {'X-Telegram-Init-Data':tg.initData};
+  if (keyboardTicket) return {'X-Keyboard-Ticket':keyboardTicket,'X-Keyboard-Device':deviceKey()};
+  if (tg?.initData) return {'X-Telegram-Init-Data':tg.initData};
+  throw new Error('Открой приложение из личного чата с ботом.');
+}
+async function hashForConfirmation(value) {
+  const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(bytes),byte=>byte.toString(16).padStart(2,'0')).join('');
+}
+$('confirm-device').onclick=async()=>{
+  try {
+    const ticketHash=await hashForConfirmation(keyboardTicket);
+    const deviceHash=await hashForConfirmation(deviceKey());
+    tg.sendData(JSON.stringify({type:'confirm-keyboard',ticketHash,deviceHash,view:launchCreate?'create':'list'}));
+  } catch {showError('Не удалось отправить подтверждение. Закрой окно и снова нажми кнопку в чате.');}
+};
 async function request(path,options={}) {
   const response=await fetch(path,{
     ...options,
     headers:{'Content-Type':'application/json',...authHeaders(),...options.headers}
   });
   const json=await response.json().catch(()=>({}));
-  if(response.status===401 && keyboardTicket)throw new Error('Обнови кнопки командой /start и открой приложение ещё раз на этом устройстве.');
+  if(response.status===401 && keyboardTicket && tg?.sendData){
+    $('confirm-device').hidden=false;
+    throw new Error('Подтверди вход с этого устройства через личный чат с ботом.');
+  }
   if(!response.ok)throw new Error(json.error||'Ошибка сервера ('+response.status+')');
   return json;
 }
@@ -180,8 +198,8 @@ function render() {
   }
 }
 async function refresh(){
-  try{const data=await request('/api/tasks');state.zone=data.timeZone;$('zone').textContent='Часовой пояс · '+state.zone;$('add-button').disabled=false;state.tasks=data.tasks;showError('');$('retry').hidden=true;render();if(launchCreate){launchCreate=false;openCreateForm();}return true;}
-  catch(e){showError(e.message);$('retry').hidden=false;}
+  try{const data=await request('/api/tasks');state.zone=data.timeZone;$('zone').textContent='Часовой пояс · '+state.zone;$('add-button').disabled=false;state.tasks=data.tasks;showError('');$('confirm-device').hidden=true;$('retry').hidden=true;render();if(launchCreate){launchCreate=false;openCreateForm();}return true;}
+  catch(e){showError(e.message);$('retry').hidden=!$('confirm-device').hidden;}
 }
 $('retry').onclick=refresh;
 const dialog=$('task-dialog');

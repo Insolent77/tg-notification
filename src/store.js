@@ -10,6 +10,10 @@ export function openStore(path, ownerId, timeZone = 'Europe/Moscow') {
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');
   db.exec(`
+    CREATE TABLE IF NOT EXISTS keyboard_devices (
+      owner_id INTEGER NOT NULL, ticket_hash TEXT NOT NULL, device_hash TEXT NOT NULL, confirmed_at INTEGER NOT NULL,
+      PRIMARY KEY(owner_id,ticket_hash,device_hash)
+    );
     CREATE TABLE IF NOT EXISTS keyboard_logins (
       owner_id INTEGER PRIMARY KEY, ticket_hash TEXT NOT NULL, device_hash TEXT, issued_at INTEGER NOT NULL
     );
@@ -80,6 +84,12 @@ export function openStore(path, ownerId, timeZone = 'Europe/Moscow') {
   }
   const digest = value=>createHash('sha256').update(value).digest('hex');
   const store = {
+    confirmKeyboardDevice(ticketHash,deviceHash) {
+      if (![ticketHash,deviceHash].every(v=>typeof v==='string' && /^[0-9a-f]{64}$/.test(v))) return false;
+      return db.prepare(`INSERT OR REPLACE INTO keyboard_devices(owner_id,ticket_hash,device_hash,confirmed_at)
+        SELECT owner_id,ticket_hash,?,? FROM keyboard_logins WHERE owner_id=? AND ticket_hash=?`)
+        .run(deviceHash,Date.now(),ownerId,ticketHash).changes===1;
+    },
     issueKeyboard() {
       const ticket=randomBytes(32).toString('hex');
       db.prepare('INSERT OR REPLACE INTO keyboard_logins(owner_id,ticket_hash,issued_at) VALUES(?,?,?)')
@@ -92,6 +102,8 @@ export function openStore(path, ownerId, timeZone = 'Europe/Moscow') {
       const login=db.prepare('SELECT device_hash,issued_at FROM keyboard_logins WHERE owner_id=? AND ticket_hash=?')
         .get(ownerId,ticketHash);
       if (!login) return false;
+      if (db.prepare('SELECT 1 FROM keyboard_devices WHERE owner_id=? AND ticket_hash=? AND device_hash=? AND confirmed_at>?')
+        .get(ownerId,ticketHash,deviceHash,Date.now()-90*86400000)) return true;
       if (login.device_hash) return login.device_hash===deviceHash && Date.now()-login.issued_at<90*86400000;
       // Only the first device opening this private keyboard within 15 minutes can bind it.
       return db.prepare('UPDATE keyboard_logins SET device_hash=? WHERE owner_id=? AND ticket_hash=? AND device_hash IS NULL AND issued_at>=?')

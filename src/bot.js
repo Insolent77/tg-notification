@@ -222,6 +222,20 @@ export function createBot(config, store, options) {
     await ctx.answerCallbackQuery();
     await updatePrompt(ctx,deleted ? 'Задача «'+task.title+'» удалена.' : 'Задача уже удалена.');
   });
+  bot.on('message:web_app_data',async ctx=>{
+    let data;
+    try { data=JSON.parse(ctx.message.web_app_data.data); } catch { return; }
+    if (data?.type!=='confirm-keyboard' || !config.publicUrl) return;
+    if (!store.confirmKeyboardDevice(data.ticketHash,data.deviceHash)) {
+      return ctx.reply('Кнопки обновлены. Открой нужный раздел внизу.',{reply_markup:menu()});
+    }
+    const create=data.view==='create';
+    const url=new URL(config.publicUrl);
+    if(create)url.searchParams.set('view','create');
+    return ctx.reply('Вход подтверждён. Можно снова пользоваться нижними кнопками.',{
+      reply_markup:new InlineKeyboard().webApp(create?createLabel:listLabel,url.href)
+    });
+  });
   bot.command('start',async ctx=>{
     const greeting='Привет! Я напомню о задачах и буду повторять уведомления до выполнения.';
     await ctx.reply(greeting,{reply_markup:menu()});

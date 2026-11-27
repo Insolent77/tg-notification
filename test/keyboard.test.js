@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {openStore} from '../src/store.js';
@@ -37,6 +38,20 @@ test('start sends one persistent Web App keyboard and both views use the member 
   assert.equal((await fetch(url,{headers:{...headers,'X-Keyboard-Device':'b'.repeat(64)}})).status,401);
   assert.equal((await fetch(url,{headers,method:'POST',body:JSON.stringify({title:'From keyboard'})})).status,201);
   assert.equal((await (await fetch(url,{headers})).json()).tasks[0].title,'From keyboard');
+  const digest=value=>createHash('sha256').update(value).digest('hex');
+  const second={...headers,'X-Keyboard-Device':'b'.repeat(64)};
+  const confirm={type:'confirm-keyboard',ticketHash:digest(ticket),deviceHash:digest(second['X-Keyboard-Device']),view:'create'};
+  const service=(from,id)=>bot.handleUpdate({update_id:id,message:{message_id:id,date:1,chat:{id:from,type:'private'},
+    from:{id:from,is_bot:false,first_name:'Test'},web_app_data:{button_text:'Создать задачу',data:JSON.stringify(confirm)}}});
+  await service(456,2);
+  assert.equal((await fetch(url,{headers:second})).status,401);
+  await service(123,3);
+  assert.equal(new URL(messages.at(-1).reply_markup.inline_keyboard[0][0].web_app.url).searchParams.get('view'),'create');
+  assert.equal((await fetch(url,{headers:second})).status,200);
+  assert.equal((await fetch(url,{headers})).status,200);
   store.issueKeyboard();
+  assert.equal((await fetch(url,{headers:second})).status,401);
+  await service(123,4);
+  assert.equal(messages.at(-1).reply_markup.is_persistent,true);
   assert.equal((await fetch(url,{headers})).status,401);
 });
