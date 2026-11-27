@@ -5,7 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#fcf5e9" />
   <title>Ежедневник · Мой секретарь</title>
+  <link rel="stylesheet" href="/flatpickr/flatpickr.min.css">
   <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/diary-picker.css">
+  <script defer src="/flatpickr/flatpickr.min.js"></script>
+  <script defer src="/flatpickr/l10n/ru.js"></script>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script type="module" src="/app.js" defer></script>
 </head>
@@ -31,8 +35,7 @@
       <div id="create-priority"></div>
       <label class="check-label"><input id="remind" type="checkbox" checked /> Напоминание</label>
       <div id="schedule">
-        <div class="date-time"><div><label for="day">Дата</label><input type="date" id="day" required></div>
-        <div><label for="time">Время</label><input type="time" id="time" required></div></div>
+        <div id="create-when"></div>
         <small id="zone"></small>
         <label class="check-label"><input type="checkbox" id="weekly"> Раз в неделю</label>
       </div>
@@ -52,8 +55,7 @@
         <button type="button" data-minutes="60">1 час</button>
         <button type="button" id="move-tomorrow">Завтра, 09:00</button>
       </div>
-      <label for="move-time">Или выбрать дату и время</label>
-      <input id="move-time" type="datetime-local" required>
+      <div id="move-when"></div>
       <button class="submit" type="submit">Перенести</button>
       <p class="error" id="move-error" role="alert" hidden></p>
     </form>

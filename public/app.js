@@ -1,4 +1,5 @@
 import {localDate,localTime,localToIso,shiftLocalDate} from './dates.js';
+import {dateTimePicker} from './diary-picker.js';
 const tg=window.Telegram?.WebApp;
 tg?.ready();
 tg?.expand();
@@ -6,8 +7,8 @@ const state={tasks:[],movingId:null,day:null};
 let launchCreate=new URLSearchParams(location.search).get('view')==='create';
 const $=id=>document.getElementById(id);
 const dateKey=date=>localDate(date,state.zone);
-const inputValue=date=>dateKey(date)+'T'+localTime(date,state.zone);
-const fromInput=value=>localToIso(...value.split('T'),state.zone);
+const createWhen=dateTimePicker($('create-when'));
+const moveWhen=dateTimePicker($('move-when'));
 function showError(message,id='error'){const el=$(id);el.hidden=!message;el.textContent=message||'';}
 const keyboardTicket=new URLSearchParams(location.hash.slice(1)).get('keyboard') || window.Telegram?.WebView?.initParams?.keyboard;
 function deviceKey() {
@@ -92,7 +93,7 @@ function openMove(id){
   $('move-task-title').textContent=task.title;
   $('move-error').hidden=true;
   const date=new Date(Date.now()+3600000);
-  $('move-time').value=inputValue(date);
+  moveWhen.reset(dateKey(date),localTime(date,state.zone),dateKey(new Date()));
   moveDialog.showModal();
 }
 async function reschedule(due_at){
@@ -108,9 +109,7 @@ $('move-tomorrow').onclick=()=>{
 };
 $('move-form').onsubmit=e=>{
   e.preventDefault();
-  const value=$('move-time').value;
-  if(!value)return;
-  try{reschedule(fromInput(value));}catch(error){showError(error.message,'move-error');}
+  try{reschedule(localToIso(...moveWhen.value(),state.zone));}catch(error){showError(error.message,'move-error');}
 };
 function dayLabel(key,options){
   return new Intl.DateTimeFormat('ru-RU',{timeZone:'UTC',...options}).format(new Date(key+'T12:00:00Z'));
@@ -207,12 +206,10 @@ function openCreateForm(){
   $('task-form').reset();
   const initial=new Date(Date.now()+3600000);
   $('schedule').hidden=false;
-  $('day').disabled=false;
-  $('time').disabled=false;
-  $('day').value=state.day && state.day!=='none' && state.day>dateKey(new Date()) ? state.day : dateKey(initial);
+  createWhen.enable(true);
+  const day=state.day && state.day!=='none' && state.day>dateKey(new Date()) ? state.day : dateKey(initial);
+  createWhen.reset(day,localTime(initial,state.zone),dateKey(new Date()));
   if(state.day==='none'){ $('remind').checked=false;$('remind').onchange(); }
-  $('time').value=localTime(initial,state.zone);
-  $('day').min=dateKey(new Date());
   showError('','form-error');
   dialog.showModal();
 }
@@ -220,7 +217,7 @@ $('add-button').onclick=openCreateForm;
 $('close-dialog').onclick=()=>dialog.close();
 $('remind').onchange=()=>{
   $('schedule').hidden=!$('remind').checked;
-  $('day').disabled=$('time').disabled=!$('remind').checked;
+  createWhen.enable($('remind').checked);
 };
 $('task-form').onsubmit=async event=>{
   event.preventDefault();
@@ -229,7 +226,7 @@ $('task-form').onsubmit=async event=>{
   if(submit.disabled) return;
   submit.disabled=true;
   try {
-    const when=$('remind').checked?localToIso($('day').value,$('time').value,state.zone):null;
+    const when=$('remind').checked?localToIso(...createWhen.value(),state.zone):null;
     const recurrence=when && $('weekly').checked?'weekly':null;
     await request('/api/tasks',{method:'POST',body:JSON.stringify({title,due_at:when,recurrence,priority:$('task-form').elements.priority.value})});
     state.day=when?dateKey(new Date(when)):'none';
